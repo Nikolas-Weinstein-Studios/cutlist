@@ -897,6 +897,15 @@
       </div>
 
       <div class="field-group">
+        <div class="stock-header">
+          <label style="margin-bottom:0;" id="stockHeaderLabel">Stock lengths on offer</label>
+        </div>
+        <div id="stockTable"></div>
+        <button class="btn-add-row" id="addStockBtn" type="button">+ Add length</button>
+        <div class="hint" id="stockHint">Leave quantity blank for unlimited stock at that length. Each row can use its own unit — handy when the yard prices big stock in feet but you're cutting in inches.</div>
+      </div>
+
+      <div class="field-group">
         <label for="partsBulk" id="cutlistLabel">Cut lengths</label>
 
         <div class="units-row">
@@ -953,15 +962,6 @@
       <div class="field-group" id="rotateGroup" hidden>
         <label style="margin-bottom:6px;"><input type="checkbox" id="allowRotateInput" checked style="width:auto;margin-right:6px;vertical-align:middle;">Allow pieces to rotate 90°</label>
         <div class="hint">Turn this off if the sheet has a grain direction or directional pattern that must stay aligned.</div>
-      </div>
-
-      <div class="field-group">
-        <div class="stock-header">
-          <label style="margin-bottom:0;" id="stockHeaderLabel">Stock lengths on offer</label>
-        </div>
-        <div id="stockTable"></div>
-        <button class="btn-add-row" id="addStockBtn" type="button">+ Add length</button>
-        <div class="hint" id="stockHint">Leave quantity blank for unlimited stock at that length. Each row can use its own unit — handy when the yard prices big stock in feet but you're cutting in inches.</div>
       </div>
 
       <button class="btn-primary" id="optimizeBtn" type="button">Optimize cutlist</button>
