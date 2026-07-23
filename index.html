@@ -108,6 +108,17 @@
     .input-panel{ position:static; }
   }
 
+  /* Desktop: fill the viewport and let each pane scroll independently —
+     whichever column the mouse is over is the one that scrolls. */
+  @media (min-width:861px){
+    html, body{ height:100%; }
+    body{ overflow:hidden; }
+    .app{ height:100vh; display:flex; flex-direction:column; padding:24px 20px 20px; }
+    .layout{ flex:1 1 auto; min-height:0; align-items:stretch; }
+    .input-panel{ position:static; top:auto; overflow-y:auto; min-height:0; }
+    .results-panel{ overflow-y:auto; min-height:0; }
+  }
+
   .field-group{ margin-bottom:18px; }
   .field-group:last-of-type{ margin-bottom:0; }
 
