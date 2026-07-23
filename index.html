@@ -362,7 +362,6 @@
   }
   .units-row label{ margin-bottom:0; }
   .units-row select{ max-width:120px; }
-  .unit-suffix{ color:var(--ink-faint); text-transform:none; letter-spacing:0; }
 
   .btn-reset{
     width:100%;
@@ -746,9 +745,18 @@
         <div class="hint" id="parseHint"></div>
       </div>
 
-      <div class="field-group">
-        <label for="kerfInput">Kerf <span class="unit-suffix" id="kerfUnit">(in)</span></label>
-        <input type="number" id="kerfInput" value="0.125" step="any" min="0">
+      <div class="field-group inline">
+        <div>
+          <label for="kerfInput">Kerf</label>
+          <input type="number" id="kerfInput" value="0.125" step="any" min="0">
+        </div>
+        <div>
+          <label for="kerfUnitSelect">Kerf unit</label>
+          <select id="kerfUnitSelect">
+            <option value="in">in</option>
+            <option value="mm">mm</option>
+          </select>
+        </div>
       </div>
 
       <div class="field-group" id="rotateGroup" hidden>
@@ -1503,10 +1511,9 @@
     }
   });
 
-  function updateUnitLabels(){
-    document.getElementById('kerfUnit').textContent = '(' + unit() + ')';
-  }
-  document.getElementById('unitSelect').addEventListener('change', () => { updateUnitLabels(); updateHash(); });
+  function kerfUnit(){ return document.getElementById('kerfUnitSelect').value; }
+  document.getElementById('unitSelect').addEventListener('change', updateHash);
+  document.getElementById('kerfUnitSelect').addEventListener('change', updateHash);
   document.getElementById('kerfInput').addEventListener('input', updateHash);
   document.getElementById('allowRotateInput').addEventListener('change', updateHash);
 
@@ -1577,6 +1584,7 @@
       rot: document.getElementById('allowRotateInput').checked,
       p: partRows.map(r => [r.value, r.qty]),
       k: document.getElementById('kerfInput').value,
+      ku: document.getElementById('kerfUnitSelect').value,
       u: document.getElementById('unitSelect').value,
       s: stockRows.map(r => [r.length, r.price, r.label, r.unit, r.qty, r.width, r.height])
     };
@@ -1596,6 +1604,7 @@
       // set mode up front so any legacy-text parse below runs in the right mode
       mode = state.m === 'sheet' ? 'sheet' : 'linear';
       document.getElementById('kerfInput').value = (state.k !== undefined && state.k !== '') ? state.k : '0.125';
+      document.getElementById('kerfUnitSelect').value = (state.ku === 'mm') ? 'mm' : 'in';
       document.getElementById('unitSelect').value = state.u || 'in';
       document.getElementById('allowRotateInput').checked = state.rot !== false;
 
@@ -1681,7 +1690,7 @@
     const cutUnit = unit();
     const kerfVal = parseFloat(document.getElementById('kerfInput').value);
     const kerfDisplay = isFinite(kerfVal) && kerfVal >= 0 ? kerfVal : 0;
-    const kerfBase = toBase(kerfDisplay, cutUnit);
+    const kerfBase = toBase(kerfDisplay, kerfUnit());
 
     const piecesBase = pieces.map(p => ({ id: p.id, length: toBase(p.length, cutUnit) }));
 
@@ -1709,7 +1718,7 @@
     }
 
     const result = optimize(piecesBase, stockTypes, kerfBase);
-    lastResult = { mode: 'linear', result, kerfBase, cutUnit };
+    lastResult = { mode: 'linear', result, kerfBase, cutUnit, kerfUnitVal: kerfUnit() };
 
     const msgs = [];
     if (result.unplaceable.length){
@@ -1748,7 +1757,7 @@
     const cutUnit = unit();
     const kerfVal = parseFloat(document.getElementById('kerfInput').value);
     const kerfDisplay = isFinite(kerfVal) && kerfVal >= 0 ? kerfVal : 0;
-    const kerfBase = toBase(kerfDisplay, cutUnit);
+    const kerfBase = toBase(kerfDisplay, kerfUnit());
     const allowRotate = document.getElementById('allowRotateInput').checked;
 
     const piecesBase = pieces.map(p => ({ id: p.id, w: toBase(p.w, cutUnit), h: toBase(p.h, cutUnit) }));
@@ -1780,7 +1789,7 @@
     }
 
     const result = optimizeSheet(piecesBase, stockTypes, kerfBase, allowRotate);
-    lastResult = { mode: 'sheet', result, kerfBase, cutUnit, allowRotate };
+    lastResult = { mode: 'sheet', result, kerfBase, cutUnit, allowRotate, kerfUnitVal: kerfUnit() };
 
     const msgs = [];
     if (result.unplaceable.length){
@@ -1824,7 +1833,7 @@
     const bins = result.bins;
 
     document.getElementById('runMeta').textContent =
-      'Kerf ' + fmt(fromBase(kerfBase, cutUnit)) + ' ' + cutUnit + ' · cutlist unit ' + cutUnit + ' · generated ' + new Date().toLocaleString();
+      'Kerf ' + fmt(fromBase(kerfBase, lastResult.kerfUnitVal)) + ' ' + lastResult.kerfUnitVal + ' · cutlist unit ' + cutUnit + ' · generated ' + new Date().toLocaleString();
 
     // ---- aggregate stats (computed in base inches, displayed in the cutlist unit) ----
     let totalCost = 0, totalUsedBase = 0, totalPurchasedBase = 0, kerfLossBase = 0, remnantBase = 0;
@@ -1931,7 +1940,7 @@
         kerfEl.className = 'kerf-mark';
         const kerfPct = (kerfBase / st.length) * 100;
         kerfEl.style.width = kerfPct + '%';
-        kerfEl.title = 'Kerf: ' + fmt(fromBase(kerfBase, cutUnit)) + ' ' + cutUnit;
+        kerfEl.title = 'Kerf: ' + fmt(fromBase(kerfBase, lastResult.kerfUnitVal)) + ' ' + lastResult.kerfUnitVal;
         bar.appendChild(kerfEl);
       }
       const seg = document.createElement('div');
@@ -1987,7 +1996,7 @@
     const allowRotate = document.getElementById('allowRotateInput').checked;
 
     document.getElementById('runMeta').textContent =
-      'Kerf ' + fmt(fromBase(kerfBase, cutUnit)) + ' ' + cutUnit + ' · rotation ' + (allowRotate ? 'allowed' : 'off') + ' · generated ' + new Date().toLocaleString();
+      'Kerf ' + fmt(fromBase(kerfBase, lastResult.kerfUnitVal)) + ' ' + lastResult.kerfUnitVal + ' · rotation ' + (allowRotate ? 'allowed' : 'off') + ' · generated ' + new Date().toLocaleString();
 
     let totalCost = 0, totalUsedAreaBase = 0, totalPurchasedAreaBase = 0, kerfAreaBase = 0, remnantAreaBase = 0;
     const byType = new Map();
@@ -2224,7 +2233,7 @@
       const { result, kerfBase, cutUnit } = lastResult;
       rows.push(['Cutlist Optimizer — Cut Plan']);
       rows.push(['Generated', new Date().toLocaleString()]);
-      rows.push(['Kerf', fmt(fromBase(kerfBase, cutUnit)) + ' ' + cutUnit]);
+      rows.push(['Kerf', fmt(fromBase(kerfBase, lastResult.kerfUnitVal)) + ' ' + lastResult.kerfUnitVal]);
       rows.push([]);
       rows.push(['PURCHASE LIST']);
       rows.push(['Stock', 'Length', 'Qty used', 'Unit price', 'Subtotal']);
@@ -2290,6 +2299,7 @@
     lastResult = null;
     document.getElementById('partsBulk').value = '';
     document.getElementById('kerfInput').value = '0.125';
+    document.getElementById('kerfUnitSelect').value = 'in';
     document.getElementById('unitSelect').value = 'in';
     document.getElementById('allowRotateInput').checked = true;
     const hint = document.getElementById('parseHint');
@@ -2297,7 +2307,6 @@
     document.getElementById('resultsContent').hidden = true;
     document.getElementById('emptyState').hidden = false;
     setMode('linear', { silent: true }); // re-render tables + copy for the reset state
-    updateUnitLabels();
     try { history.replaceState(null, '', location.pathname + location.search); } catch(e){ /* ignore */ }
   }
   document.getElementById('resetBtn').addEventListener('click', resetAll);
@@ -2306,7 +2315,6 @@
   const restored = restoreFromHash();
   renderStockTable();
   renderPartsTable();
-  updateUnitLabels();
   if (restored && partRows.some(r => String(r.value).trim())){
     runOptimizer();
   }
