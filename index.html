@@ -60,7 +60,66 @@
     border-bottom:1px solid var(--line);
     padding-bottom:18px;
     margin-bottom:22px;
+    position:relative;
   }
+  .help-btn{
+    position:absolute;
+    top:0;
+    right:0;
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.02em;
+    color:var(--blue);
+    background:none;
+    border:1px solid var(--blue);
+    border-radius:8px;
+    padding:7px 12px;
+    cursor:pointer;
+  }
+  .help-btn:hover{ background:var(--blue); color:#fff; }
+
+  .modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(28,26,21,0.45);
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    padding:40px 20px;
+    z-index:100;
+    overflow-y:auto;
+  }
+  .modal{
+    position:relative;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    max-width:640px;
+    width:100%;
+    padding:28px 30px 30px;
+    box-shadow:0 20px 60px rgba(18,51,63,0.35);
+  }
+  .modal-close{
+    position:absolute;
+    top:14px; right:16px;
+    width:30px; height:30px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    color:var(--ink-soft);
+    font-size:18px;
+    line-height:1;
+    cursor:pointer;
+  }
+  .modal-close:hover{ background:var(--warn-bg); color:var(--warn); }
+  .modal h2{ font-family:var(--font-display); font-size:22px; margin:0 0 8px; }
+  .modal h3{ font-family:var(--font-mono); font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color:var(--blue); margin:20px 0 6px; }
+  .modal p, .modal li{ font-size:14px; color:var(--ink); line-height:1.55; }
+  .modal .modal-lead{ color:var(--ink-soft); }
+  .modal ul{ margin:6px 0 0; padding-left:20px; }
+  .modal li{ margin-bottom:4px; }
+  .modal code{ font-family:var(--font-mono); font-size:12px; background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:1px 5px; }
+  .modal .modal-foot{ margin-top:20px; padding-top:14px; border-top:1px solid var(--line); font-size:13px; color:var(--ink-soft); }
   .eyebrow{
     font-family:var(--font-mono);
     font-size:11px;
@@ -346,8 +405,11 @@
   .pf-summary{
     width:100%;
     height:34px;
+    display:flex;
+    align-items:center;
+    gap:4px;
     text-align:left;
-    padding:0 8px;
+    padding:0 6px 0 8px;
     border:1px solid var(--line);
     border-radius:8px;
     background:#fff;
@@ -355,13 +417,20 @@
     font-size:12px;
     color:var(--ink);
     cursor:pointer;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+  }
+  .pf-summary .pf-sum-txt{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pf-summary .pf-caret{
+    flex-shrink:0;
+    color:var(--blue);
+    font-size:10px;
+    transform:rotate(-90deg);
+    transition:transform 0.12s ease;
   }
   .pf-summary.empty{ color:var(--ink-ghost); }
-  .pf-summary:hover{ border-color:var(--blue); }
+  .pf-summary.empty .pf-caret{ color:var(--ink-faint); }
+  .pf-summary:hover{ border-color:var(--blue); background:#F7FAFB; }
   .pf-summary.open{ border-color:var(--blue); border-bottom-left-radius:0; border-bottom-right-radius:0; }
+  .pf-summary.open .pf-caret{ transform:rotate(0deg); }
   .part-fields{
     margin:6px 0 4px 0;
     padding:10px;
@@ -409,12 +478,16 @@
   }
   .cm-row{
     display:grid;
-    grid-template-columns:minmax(0,1fr) 108px;
+    grid-template-columns:16px minmax(0,1fr) 108px;
     gap:8px;
     align-items:center;
     margin-bottom:6px;
+    border-radius:6px;
   }
   .cm-row:last-child{ margin-bottom:0; }
+  .cm-grip{ cursor:grab; color:var(--ink-faint); font-size:13px; line-height:1; user-select:none; text-align:center; }
+  .cm-row.cm-dragging{ opacity:0.4; }
+  .cm-row.cm-over{ box-shadow:0 0 0 2px var(--blue) inset; }
   .cm-col-name{
     font-family:var(--font-mono);
     font-size:12px;
@@ -878,7 +951,7 @@
   }
 
   @media print{
-    .floating-actions{ display:none !important; }
+    .floating-actions, .help-btn, .modal-overlay{ display:none !important; }
     body.label-print-mode .app-header,
     body.label-print-mode .layout{ display:none !important; }
     body.label-print-mode #labelSheet{ display:block !important; }
@@ -907,6 +980,7 @@
 <div class="app">
 
   <header class="app-header">
+    <button class="help-btn" id="helpBtn" type="button">? How to use</button>
     <h1>Cutlist Optimizer</h1>
     <p class="sub">Paste cut lengths, set stock and kerf, get a cut order sized and priced against what the yard actually sells.</p>
   </header>
@@ -1043,6 +1117,45 @@
   <button class="fab-optimize" id="fabOptimize" type="button">Optimize ↑</button>
 </div>
 
+<div class="modal-overlay" id="helpModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <button class="modal-close" id="helpClose" type="button" aria-label="Close">×</button>
+    <h2 id="helpTitle">How to use</h2>
+    <p class="modal-lead">Paste your parts, list the stock the yard sells, and optimize. The tool packs your cuts to cost the least and gives you a cut order, offcuts, and printable labels.</p>
+
+    <h3>1 · Mode</h3>
+    <p><strong>Linear</strong> is for bar/tube/extrusion cut to length. <strong>Sheet goods</strong> nests 2D parts (W × H) onto sheets.</p>
+
+    <h3>2 · Stock</h3>
+    <p>List every stock size the yard offers, each with a price. Leave <strong>Qty</strong> blank for unlimited. With more than one option the optimizer picks the mix that costs least. Each stock row can use its own unit.</p>
+
+    <h3>3 · Parts</h3>
+    <p>Type parts, paste a list, drop a <strong>.csv/.txt</strong> file, or choose one from disk. A plain list is 1 of each; identical parts combine into a quantity you can edit. <strong>Units</strong> at the top set what your part sizes are in.</p>
+
+    <h3>4 · Mapping CSV columns</h3>
+    <p>When you paste a spreadsheet with a header row, the <strong>Assign columns</strong> panel lets you tell the tool what each column is:</p>
+    <ul>
+      <li><strong>Length / Width / Height / Size</strong> — the dimension to cut. Pick the right one when several columns hold numbers.</li>
+      <li><strong>Qty</strong> — how many of each part.</li>
+      <li><strong>Label color</strong> — groups parts by color on the printed label (see below).</li>
+      <li><strong>Info</strong> — becomes part of the label text (e.g. part name, bend radius).</li>
+      <li><strong>Ignore</strong> — dropped.</li>
+    </ul>
+    <p>Drag the ⠿ handles to set the order info fields appear on the label.</p>
+
+    <h3>5 · Label color</h3>
+    <p>A color value can be a real color (<code>blue</code>, <code>#B8451F</code>) or any group name (<code>Zone A</code>) — group names get a consistent color automatically. Printed labels get a colored edge band for that group; the rest stays white to save ink.</p>
+
+    <h3>6 · Kerf</h3>
+    <p>The blade width lost per cut, in its own inch/mm unit. It's charged between parts sharing a stock piece.</p>
+
+    <h3>7 · Results</h3>
+    <p><strong>Optimize</strong> gives a purchase list, a cut plan per stock piece, and an <strong>All remnants</strong> summary of your offcuts. Export the plan as <strong>text</strong>, <strong>CSV</strong>, or <strong>PDF</strong>, <strong>Print labels in cut order</strong>, or <strong>copy a link</strong> that restores everything.</p>
+
+    <p class="modal-foot">Tip: the parts list and results scroll independently — hover over the one you want to scroll.</p>
+  </div>
+</div>
+
 <script>
 (function(){
 
@@ -1059,6 +1172,7 @@
   let nextPartId = 2;
   const expandedParts = new Set(); // part ids whose info-field editor is open
   let colRoles = null;        // role per CSV column when the paste box holds a header row
+  let colOrder = null;        // display/label order of CSV columns (drag to rearrange)
   let lastHeaderSig = '';     // header line last mapped, so user choices survive edits
 
   const PALETTE = ['#1F4B5F','#B8451F','#5C6B3C','#8A6A2F','#3E6350','#6B4C6B','#3E5A6B','#7A4B3E',
@@ -1238,7 +1352,7 @@
       let html =
         '<div class="part-main">' +
           '<input type="text" data-field="value" value="' + esc(row.value) + '" placeholder="' + (mode === 'sheet' ? '24 x 36' : '38') + '">' +
-          '<button type="button" class="pf-summary' + (summary ? '' : ' empty') + (open ? ' open' : '') + '" data-action="toggle-fields" title="' + esc(summary || 'Add info fields') + '">' + dot + escapeHtml(summaryTxt) + '</button>' +
+          '<button type="button" class="pf-summary' + (summary ? '' : ' empty') + (open ? ' open' : '') + '" data-action="toggle-fields" title="Click to add a color and info fields"><span class="pf-sum-txt">' + dot + escapeHtml(summaryTxt) + '</span><span class="pf-caret">▾</span></button>' +
           '<input type="number" min="1" step="1" data-field="qty" value="' + row.qty + '">' +
           '<button class="row-remove" data-action="remove-part" title="Remove this part" ' + (partRows.length <= 1 ? 'disabled' : '') + '>×</button>' +
         '</div>';
@@ -1355,7 +1469,7 @@
   // Parse CSV/TSV into {value,fields,qty}. With a header, an explicit column
   // mapping (roles) decides which column is length/size/qty; the rest become
   // info fields. Headerless input falls back to positional best-effort.
-  function csvSeeds(text, roles){
+  function csvSeeds(text, roles, order){
     const rows = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const lc = headerCells(text);
     const rawHeader = lc ? rows[0].split(/[,\t]/).map(c => c.trim()) : null;
@@ -1365,6 +1479,7 @@
       const dataRows = rows.slice(1);
       const usable = roles && roles.length === lc.length && roles.some(r => r==='length' || r==='width' || r==='size');
       const colr = usable ? roles.slice() : rolesFor(lc, dataRows);
+      const seq = (order && order.length === colr.length) ? order : colr.map((_, i) => i);
       const idxLen = colr.indexOf('length'), idxW = colr.indexOf('width'), idxH = colr.indexOf('height'), idxSize = colr.indexOf('size'), idxQty = colr.indexOf('qty'), idxColor = colr.indexOf('color');
       dataRows.forEach(line => {
         const cells = line.split(/[,\t]/).map(c => c.trim());
@@ -1383,7 +1498,7 @@
         if (value === null){ warnings.push('Couldn\'t read row "' + line + '".'); return; }
         const color = idxColor >= 0 ? (cells[idxColor] || '') : '';
         const fields = [];
-        colr.forEach((r, i) => { if (r !== 'info') return; const v = (cells[i] || '').trim(); if (v) fields.push({ name: rawHeader[i] || '', value: v }); });
+        seq.forEach(i => { if (colr[i] !== 'info') return; const v = (cells[i] || '').trim(); if (v) fields.push({ name: rawHeader[i] || '', value: v }); });
         seeds.push({ value, fields, qty: qty > 0 ? qty : 1, color });
       });
     } else {
@@ -1414,19 +1529,27 @@
 
   // ---------- column mapper UI ----------
   const ROLE_OPTS = {
-    linear: [['length','Length'],['qty','Qty'],['color','Color'],['info','Info'],['ignore','Ignore']],
-    sheet:  [['width','Width'],['height','Height'],['size','Size (WxH)'],['qty','Qty'],['color','Color'],['info','Info'],['ignore','Ignore']]
+    linear: [['length','Length'],['qty','Qty'],['color','Label color'],['info','Info'],['ignore','Ignore']],
+    sheet:  [['width','Width'],['height','Height'],['size','Size (WxH)'],['qty','Qty'],['color','Label color'],['info','Info'],['ignore','Ignore']]
   };
+
+  function currentHeader(){
+    return (document.getElementById('partsBulk').value.split(/\r?\n/).find(l => l.trim()) || '').split(/[,\t]/).map(c => c.trim());
+  }
 
   function refreshColMap(){
     const text = document.getElementById('partsBulk').value;
     const lc = headerCells(text);
     const map = document.getElementById('colMap');
-    if (!lc){ colRoles = null; lastHeaderSig = ''; map.hidden = true; document.getElementById('colMapRows').innerHTML = ''; return; }
+    if (!lc){ colRoles = null; colOrder = null; lastHeaderSig = ''; map.hidden = true; document.getElementById('colMapRows').innerHTML = ''; return; }
     const rows = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const rawHeader = rows[0].split(/[,\t]/).map(c => c.trim());
     const sig = mode + '::' + rows[0];
-    if (sig !== lastHeaderSig){ colRoles = rolesFor(lc, rows.slice(1)); lastHeaderSig = sig; }
+    if (sig !== lastHeaderSig){
+      colRoles = rolesFor(lc, rows.slice(1));
+      colOrder = rawHeader.map((_, i) => i);
+      lastHeaderSig = sig;
+    }
     renderColMap(rawHeader);
     map.hidden = false;
   }
@@ -1434,9 +1557,15 @@
   function renderColMap(rawHeader){
     const opts = ROLE_OPTS[mode];
     const wrap = document.getElementById('colMapRows');
-    wrap.innerHTML = rawHeader.map((name, i) => {
+    if (!colOrder || colOrder.length !== rawHeader.length) colOrder = rawHeader.map((_, i) => i);
+    wrap.innerHTML = colOrder.map((i, pos) => {
+      const name = rawHeader[i] || ('Column ' + (i+1));
       const sel = opts.map(([v, lbl]) => '<option value="' + v + '"' + (colRoles[i] === v ? ' selected' : '') + '>' + lbl + '</option>').join('');
-      return '<div class="cm-row"><span class="cm-col-name" title="' + esc(name) + '">' + escapeHtml(name || ('Column ' + (i+1))) + '</span><select data-col="' + i + '">' + sel + '</select></div>';
+      return '<div class="cm-row" draggable="true" data-pos="' + pos + '">' +
+        '<span class="cm-grip" title="Drag to reorder">⠿</span>' +
+        '<span class="cm-col-name" title="' + esc(name) + '">' + escapeHtml(name) + '</span>' +
+        '<select data-col="' + i + '">' + sel + '</select>' +
+      '</div>';
     }).join('');
   }
 
@@ -1445,13 +1574,42 @@
     if (col === undefined || !colRoles) return;
     const i = parseInt(col, 10);
     const val = e.target.value;
-    // length/width/height/size/qty are single-assignment — free any other column holding it
+    // length/width/height/size/qty/color are single-assignment — free any other column holding it
     if (val !== 'info' && val !== 'ignore'){
       colRoles.forEach((r, k) => { if (k !== i && r === val) colRoles[k] = 'info'; });
     }
     colRoles[i] = val;
-    renderColMap((document.getElementById('partsBulk').value.split(/\r?\n/).find(l => l.trim()) || '').split(/[,\t]/).map(c => c.trim()));
+    renderColMap(currentHeader());
   });
+
+  // drag-to-reorder the column rows (sets the order info fields appear on the label)
+  (function(){
+    const wrap = document.getElementById('colMapRows');
+    let fromPos = null;
+    wrap.addEventListener('dragstart', (e) => {
+      const row = e.target.closest('.cm-row'); if (!row) return;
+      fromPos = parseInt(row.dataset.pos, 10);
+      row.classList.add('cm-dragging');
+      if (e.dataTransfer){ e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', String(fromPos)); } catch(_){} }
+    });
+    wrap.addEventListener('dragend', () => { fromPos = null; wrap.querySelectorAll('.cm-row').forEach(r => r.classList.remove('cm-dragging','cm-over')); });
+    wrap.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const row = e.target.closest('.cm-row'); if (!row) return;
+      wrap.querySelectorAll('.cm-row').forEach(r => r.classList.remove('cm-over'));
+      row.classList.add('cm-over');
+    });
+    wrap.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const row = e.target.closest('.cm-row'); if (!row || fromPos === null || !colOrder) return;
+      const toPos = parseInt(row.dataset.pos, 10);
+      if (toPos === fromPos) return;
+      const moved = colOrder.splice(fromPos, 1)[0];
+      colOrder.splice(toPos, 0, moved);
+      fromPos = null;
+      renderColMap(currentHeader());
+    });
+  })();
 
   // Fold {value,fields,qty} seeds into the rows, merging matches (size + fields).
   function mergeSeeds(seeds){
@@ -1474,7 +1632,7 @@
     opts = opts || {};
     let seeds, warnings;
     if (shouldCsv(text, opts.fromFile)){
-      ({ seeds, warnings } = csvSeeds(text, opts.roles));
+      ({ seeds, warnings } = csvSeeds(text, opts.roles, opts.order));
     } else {
       const parsed = mode === 'sheet' ? parseSheetList(text) : parseCutlist(text);
       warnings = parsed.warnings;
@@ -1497,7 +1655,7 @@
 
   function importBulk(){
     const el = document.getElementById('partsBulk');
-    importText(el.value, { roles: colRoles, fromFile: stagedFromFile });
+    importText(el.value, { roles: colRoles, order: colOrder, fromFile: stagedFromFile });
     el.value = '';
     stagedFromFile = false;
     refreshColMap();
@@ -2908,6 +3066,17 @@
   document.getElementById('resetBtn').addEventListener('click', resetAll);
   document.getElementById('fabOptimize').addEventListener('click', runOptimizer);
   document.getElementById('fabReset').addEventListener('click', resetAll);
+
+  // how-to modal
+  (function(){
+    const overlay = document.getElementById('helpModal');
+    const open = () => { overlay.hidden = false; };
+    const close = () => { overlay.hidden = true; };
+    document.getElementById('helpBtn').addEventListener('click', open);
+    document.getElementById('helpClose').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
+  })();
 
   // ---------- init ----------
   const restored = restoreFromHash();
