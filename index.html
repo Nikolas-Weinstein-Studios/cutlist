@@ -309,7 +309,7 @@
 
   .parts-head{
     display:grid;
-    grid-template-columns:1fr 62px 28px;
+    grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) 52px 28px;
     gap:8px;
     margin-bottom:5px;
   }
@@ -322,7 +322,7 @@
   }
   .part-row{
     display:grid;
-    grid-template-columns:1fr 62px 28px;
+    grid-template-columns:minmax(0,1fr) minmax(0,1.1fr) 52px 28px;
     gap:8px;
     align-items:center;
     margin-bottom:8px;
@@ -675,6 +675,66 @@
     margin-bottom:16px;
   }
 
+  /* remnants summary */
+  #remnantsWrap{ margin-bottom:22px; }
+  .remnant-sheets{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
+    gap:14px;
+  }
+  .remnant-sheet .cap{
+    font-family:var(--font-mono);
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-bottom:5px;
+  }
+  .remnant-svg-wrap{
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:8px;
+    overflow:hidden;
+    background:#fff;
+    line-height:0;
+  }
+  .remnant-svg-wrap svg{ display:block; width:100%; height:auto; }
+  .remnant-sheet-outline{ fill:none; stroke:var(--waste-line); stroke-width:1; }
+  .remnant-free{ fill:var(--green); fill-opacity:0.16; stroke:var(--green); stroke-width:1; }
+  .remnant-free-label{ font-family:var(--font-mono); fill:var(--green); text-anchor:middle; dominant-baseline:middle; }
+
+  /* printable label sheet */
+  #labelSheet h2{ font-family:var(--font-display); font-size:20px; margin:0 0 4px; }
+  .label-grid{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:8px;
+    margin-bottom:6px;
+  }
+  .label-stock-head{
+    grid-column:1 / -1;
+    font-family:var(--font-mono);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    color:var(--ink-soft);
+    margin:14px 0 4px;
+  }
+  .label-card{
+    border:1px solid var(--ink);
+    border-radius:6px;
+    padding:8px 10px;
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+  .label-card .lc-name{ font-family:var(--font-display); font-weight:600; font-size:14px; line-height:1.2; }
+  .label-card .lc-dim{ font-family:var(--font-mono); font-size:12px; margin-top:2px; }
+  .label-card .lc-meta{ font-family:var(--font-mono); font-size:10px; color:var(--ink-soft); margin-top:3px; }
+
+  @media print{
+    body.label-print-mode .app-header,
+    body.label-print-mode .layout{ display:none !important; }
+    body.label-print-mode #labelSheet{ display:block !important; }
+  }
+
   @media print{
     *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
     @page{ margin:14mm; }
@@ -800,11 +860,15 @@
           <button class="copy-btn" id="copyBtn" type="button">Copy cut plan as text</button>
           <button class="copy-btn" id="csvBtn" type="button">Download CSV</button>
           <button class="copy-btn" id="printBtn" type="button">Print / save as PDF</button>
+          <button class="copy-btn" id="printLabelsBtn" type="button">Print labels in cut order</button>
         </div>
 
         <h3 class="section-title">Cut plan, by stock piece</h3>
         <div class="legend-row" id="legendRow"></div>
         <div class="bins-wrap" id="binsWrap"></div>
+
+        <h3 class="section-title" id="remnantsTitle">All remnants</h3>
+        <div id="remnantsWrap"></div>
 
         <div class="footnote" id="footnoteText">
           Optimization uses a best-fit-decreasing heuristic: pieces are placed largest-first into whichever open stock piece, or new stock option, uses the most material per dollar. It's fast and close to optimal in practice, but the general cutting-stock problem is NP-hard — for very large or unusual lists, a marginally better arrangement may exist. Kerf is charged between pieces sharing a stock piece, not after the last one.
@@ -812,6 +876,9 @@
       </div>
     </main>
   </div>
+
+  <!-- printable label sheet (cut order); shown only when printing labels -->
+  <div id="labelSheet" hidden></div>
 </div>
 
 <script>
@@ -825,8 +892,8 @@
   let nextStockId = 2;
   let lastResult = null;
 
-  // parts list: one row per unique value, with an editable quantity (default 1)
-  let partRows = [ { id: 1, value: '', qty: 1 } ];
+  // parts list: one row per unique value+label, with an editable quantity (default 1)
+  let partRows = [ { id: 1, value: '', label: '', qty: 1 } ];
   let nextPartId = 2;
 
   const PALETTE = ['#1F4B5F','#B8451F','#5C6B3C','#8A6A2F','#3E6350','#6B4C6B','#3E5A6B','#7A4B3E',
@@ -940,6 +1007,8 @@
     const n = parseFloat(v);
     return isFinite(n) ? fmt(n) : v.toLowerCase();
   }
+  // rows merge only when BOTH size and label match; label-less rows merge by size as before
+  function rowKey(value, label){ return normKey(value) + '||' + String(label || '').trim().toLowerCase(); }
 
   function renderPartsTable(){
     const wrap = document.getElementById('partsTable');
@@ -947,7 +1016,7 @@
     if (!partRows.length) return;
     const head = document.createElement('div');
     head.className = 'parts-head';
-    head.innerHTML = '<span>' + (mode === 'sheet' ? 'Size (W x H)' : 'Length') + '</span><span>Qty</span><span></span>';
+    head.innerHTML = '<span>' + (mode === 'sheet' ? 'Size (W x H)' : 'Length') + '</span><span>Label / part #</span><span>Qty</span><span></span>';
     wrap.appendChild(head);
     partRows.forEach(row => {
       const div = document.createElement('div');
@@ -955,6 +1024,7 @@
       div.dataset.partId = row.id;
       div.innerHTML =
         '<input type="text" data-field="value" value="' + String(row.value).replace(/"/g,'&quot;') + '" placeholder="' + (mode === 'sheet' ? '24 x 36' : '38') + '">' +
+        '<input type="text" data-field="label" value="' + String(row.label || '').replace(/"/g,'&quot;') + '" placeholder="optional">' +
         '<input type="number" min="1" step="1" data-field="qty" value="' + row.qty + '">' +
         '<button class="row-remove" data-action="remove-part" title="Remove this part" ' + (partRows.length <= 1 ? 'disabled' : '') + '>×</button>';
       wrap.appendChild(div);
@@ -1004,65 +1074,85 @@
     return false;
   }
 
+  // Parse CSV/TSV into {value,label,qty}. The dimension column(s) and a qty
+  // column are found by header (or by position); every OTHER non-empty column
+  // becomes the label, using its header — e.g. "RIB-A · Bend Radius: 12".
   function csvSeeds(text){
     const rows = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    const header = headerCells(text);
+    const lc = headerCells(text); // lowercased header names, or null
+    const rawHeader = lc ? rows[0].split(/[,\t]/).map(c => c.trim()) : null;
     let idxLen=-1, idxW=-1, idxH=-1, idxQty=-1, idxSize=-1;
     let dataRows = rows;
-    if (header){
+    if (lc){
       dataRows = rows.slice(1);
-      header.forEach((h, i) => {
-        if (/^(qty|quantity|count|#)$/.test(h)) idxQty = i;
-        else if (/^(length|len|cut|long)$/.test(h)) idxLen = i;
+      lc.forEach((h, i) => {
+        if (/^(qty|quantity|count)$/.test(h)) idxQty = i;
+        else if (/^(length|len|cut)$/.test(h)) idxLen = i;
         else if (/^(width|w)$/.test(h)) idxW = i;
-        else if (/^(height|ht|h|depth|d)$/.test(h)) idxH = i;
-        else if (/^(size|dim|dimensions|part)$/.test(h)) idxSize = i;
+        else if (/^(height|ht|h|depth)$/.test(h)) idxH = i;
+        else if (/^(size|dim|dimension|dimensions)$/.test(h)) idxSize = i;
       });
     }
+    const titleCase = s => String(s).replace(/\b\w/g, c => c.toUpperCase());
+    const nameRe = /name|part|mark|tag|label|piece|item|\bid\b/;
     const seeds = [], warnings = [];
+
     dataRows.forEach(line => {
       const cells = line.split(/[,\t]/).map(c => c.trim());
       if (cells.every(c => c === '')) return;
+      const consumed = new Set();
+      let value = null, qty = 1;
+
       if (mode === 'sheet'){
-        let w, h, qty = 1;
-        const szInRow = cells.map(sizeCell).find(Boolean);
-        if (header && idxSize >= 0 && sizeCell(cells[idxSize])){ [w, h] = sizeCell(cells[idxSize]); }
-        else if (header && idxW >= 0 && idxH >= 0){ w = firstNum(cells[idxW]); h = firstNum(cells[idxH]); }
-        else if (szInRow){ [w, h] = szInRow; }
-        else { const nums = cells.filter(isNumeric).map(parseFloat); w = nums[0]; h = nums[1]; }
-        if (header && idxQty >= 0 && isNumeric(cells[idxQty])) qty = parseInt(cells[idxQty], 10);
-        else if (!header){
-          const nums = cells.filter(c => isNumeric(c) && !cells.some(cc => sizeCell(cc) && cc === c)).map(parseFloat);
-          if (szInRow && nums.length) qty = parseInt(nums[0], 10);
-          else if (!szInRow && nums.length >= 3) qty = parseInt(nums[2], 10);
+        let w, h;
+        if (lc && idxSize >= 0 && sizeCell(cells[idxSize])){ [w, h] = sizeCell(cells[idxSize]); consumed.add(idxSize); }
+        else if (lc && idxW >= 0 && idxH >= 0){ w = firstNum(cells[idxW]); h = firstNum(cells[idxH]); consumed.add(idxW); consumed.add(idxH); }
+        else {
+          const szi = cells.findIndex(c => sizeCell(c));
+          if (szi >= 0){ [w, h] = sizeCell(cells[szi]); consumed.add(szi); }
+          else { const ni = []; cells.forEach((c,i) => { if (isNumeric(c)) ni.push(i); }); if (ni.length >= 2){ w = parseFloat(cells[ni[0]]); h = parseFloat(cells[ni[1]]); consumed.add(ni[0]); consumed.add(ni[1]); } }
         }
-        if (isFinite(w) && isFinite(h) && w > 0 && h > 0) seeds.push({ value: fmt(w) + ' x ' + fmt(h), qty: qty > 0 ? qty : 1 });
-        else warnings.push('Couldn\'t read row "' + line + '".');
+        if (lc && idxQty >= 0 && isNumeric(cells[idxQty])){ qty = parseInt(cells[idxQty], 10); consumed.add(idxQty); }
+        else if (!lc){ const ni = []; cells.forEach((c,i) => { if (isNumeric(c) && !consumed.has(i)) ni.push(i); }); if (ni.length){ qty = parseInt(cells[ni[0]], 10); consumed.add(ni[0]); } }
+        if (isFinite(w) && isFinite(h) && w > 0 && h > 0) value = fmt(w) + ' x ' + fmt(h);
       } else {
-        let len, qty = 1;
-        if (header && idxLen >= 0) len = firstNum(cells[idxLen]);
-        else len = (cells.filter(isNumeric).map(parseFloat))[0];
-        if (header && idxQty >= 0 && isNumeric(cells[idxQty])) qty = parseInt(cells[idxQty], 10);
-        else if (!header){ const nums = cells.filter(isNumeric).map(parseFloat); if (nums.length >= 2) qty = parseInt(nums[1], 10); }
-        if (isFinite(len) && len > 0) seeds.push({ value: fmt(len), qty: qty > 0 ? qty : 1 });
-        else warnings.push('Couldn\'t read row "' + line + '".');
+        let len;
+        if (lc && idxLen >= 0){ len = firstNum(cells[idxLen]); consumed.add(idxLen); }
+        else { const li = cells.findIndex(isNumeric); if (li >= 0){ len = parseFloat(cells[li]); consumed.add(li); } }
+        if (lc && idxQty >= 0 && isNumeric(cells[idxQty])){ qty = parseInt(cells[idxQty], 10); consumed.add(idxQty); }
+        else if (!lc){ const ni = []; cells.forEach((c,i) => { if (isNumeric(c) && !consumed.has(i)) ni.push(i); }); if (ni.length){ qty = parseInt(cells[ni[0]], 10); consumed.add(ni[0]); } }
+        if (isFinite(len) && len > 0) value = fmt(len);
       }
+
+      if (value === null){ warnings.push('Couldn\'t read row "' + line + '".'); return; }
+
+      // everything not used for size/qty becomes the label
+      const extras = [];
+      cells.forEach((c, i) => { if (consumed.has(i)) return; const v = (c || '').trim(); if (v) extras.push({ h: rawHeader ? rawHeader[i] : '', v }); });
+      let label = '';
+      if (extras.length){
+        let pIdx = rawHeader ? extras.findIndex(e => nameRe.test(String(e.h).toLowerCase())) : 0;
+        if (pIdx < 0) pIdx = 0;
+        const rest = extras.filter((e, k) => k !== pIdx).map(e => e.h ? (titleCase(e.h) + ': ' + e.v) : e.v);
+        label = [extras[pIdx].v, ...rest].join(' · ');
+      }
+      seeds.push({ value, label, qty: qty > 0 ? qty : 1 });
     });
     return { seeds, warnings };
   }
 
-  // Fold a set of {value, qty} seeds into the existing rows, merging duplicates.
+  // Fold {value,label,qty} seeds into the rows, merging matches (size + label).
   function mergeSeeds(seeds){
     const order = [], map = new Map();
-    const seed = (value, qty) => {
-      const key = normKey(value);
-      if (!map.has(key)){ map.set(key, { value, qty }); order.push(key); }
-      else { map.get(key).qty += qty; }
+    const seed = (value, label, qty) => {
+      const key = rowKey(value, label);
+      if (!map.has(key)){ map.set(key, { value, label, qty }); order.push(key); }
+      else { const e = map.get(key); e.qty += qty; if (!e.label && label) e.label = label; }
     };
-    partRows.forEach(r => { if (String(r.value).trim()) seed(String(r.value).trim(), parseInt(r.qty,10) || 0); });
-    seeds.forEach(s => seed(s.value, s.qty > 0 ? s.qty : 1));
-    partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, qty: map.get(k).qty }));
-    if (!partRows.length) partRows = [ { id: 1, value: '', qty: 1 } ];
+    partRows.forEach(r => { if (String(r.value).trim()) seed(String(r.value).trim(), r.label || '', parseInt(r.qty,10) || 0); });
+    seeds.forEach(s => seed(s.value, s.label || '', s.qty > 0 ? s.qty : 1));
+    partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, label: map.get(k).label || '', qty: map.get(k).qty }));
+    if (!partRows.length) partRows = [ { id: 1, value: '', label: '', qty: 1 } ];
     nextPartId = partRows.length + 1;
   }
 
@@ -1076,7 +1166,7 @@
     } else {
       const parsed = mode === 'sheet' ? parseSheetList(text) : parseCutlist(text);
       warnings = parsed.warnings;
-      seeds = parsed.pieces.map(p => ({ value: mode === 'sheet' ? (fmt(p.w) + ' x ' + fmt(p.h)) : fmt(p.length), qty: 1 }));
+      seeds = parsed.pieces.map(p => ({ value: mode === 'sheet' ? (fmt(p.w) + ' x ' + fmt(p.h)) : fmt(p.length), label: '', qty: 1 }));
     }
     mergeSeeds(seeds);
     renderPartsTable();
@@ -1107,19 +1197,22 @@
     partRows.forEach(r => {
       const value = String(r.value).trim();
       if (!value) return;
+      const label = String(r.label || '').trim();
       const q = parseInt(r.qty, 10);
       const qty = (isFinite(q) && q > 0) ? q : 1;
+      // a labeled row with qty > 1 auto-numbers its pieces (RIB-A #1, #2, …)
+      const pieceLabel = i => (label && qty > 1) ? (label + ' #' + (i+1)) : label;
       if (mode === 'sheet'){
         const m = value.match(/^(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)$/);
         if (!m){ warnings.push('Couldn\'t read "' + value + '" — expected "W x H".'); return; }
         const w = parseFloat(m[1]), h = parseFloat(m[2]);
         if (w <= 0 || h <= 0){ warnings.push('Skipped "' + value + '" — dimensions must be greater than zero.'); return; }
-        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, w, h });
+        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, w, h, label: pieceLabel(i) });
       } else {
         if (!/^\d+(?:\.\d+)?$/.test(value)){ warnings.push('Couldn\'t read "' + value + '" — expected a number.'); return; }
         const length = parseFloat(value);
         if (length <= 0){ warnings.push('Skipped "' + value + '" — must be greater than zero.'); return; }
-        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, length });
+        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, length, label: pieceLabel(i) });
       }
     });
     return { pieces, warnings };
@@ -1153,7 +1246,7 @@
   })();
 
   document.getElementById('addPartBtn').addEventListener('click', () => {
-    partRows.push({ id: nextPartId++, value: '', qty: 1 });
+    partRows.push({ id: nextPartId++, value: '', label: '', qty: 1 });
     renderPartsTable();
     updateHash();
   });
@@ -1329,7 +1422,7 @@
       const choice = chooseFreeRect(freeRects, p.w, p.h, kerf, allowRotate);
       if (!choice){ unplaced.push(p); continue; }
       const rect = freeRects[choice.idx];
-      placements.push({ id: p.id, x: rect.x, y: rect.y, w: choice.placedW, h: choice.placedH, rotated: choice.rotated });
+      placements.push({ id: p.id, x: rect.x, y: rect.y, w: choice.placedW, h: choice.placedH, rotated: choice.rotated, label: p.label });
       const newRects = splitFreeRect(rect, choice.consumedW, choice.consumedH);
       freeRects.splice(choice.idx, 1, ...newRects);
       usedArea += p.w * p.h;
@@ -1373,7 +1466,7 @@
       if (bestBinIdx >= 0){
         const b = bins[bestBinIdx];
         const rect = b.freeRects[bestChoice.idx];
-        b.placements.push({ id: piece.id, x: rect.x, y: rect.y, w: bestChoice.placedW, h: bestChoice.placedH, rotated: bestChoice.rotated });
+        b.placements.push({ id: piece.id, x: rect.x, y: rect.y, w: bestChoice.placedW, h: bestChoice.placedH, rotated: bestChoice.rotated, label: piece.label });
         const newRects = splitFreeRect(rect, bestChoice.consumedW, bestChoice.consumedH);
         b.freeRects.splice(bestChoice.idx, 1, ...newRects);
         b.usedArea += piece.w * piece.h;
@@ -1561,7 +1654,7 @@
     applyModeCopy();
     if (!opts.silent){
       // linear lengths and sheet sizes aren't interchangeable — start clean
-      partRows = [ { id: 1, value: '', qty: 1 } ];
+      partRows = [ { id: 1, value: '', label: '', qty: 1 } ];
       nextPartId = 2;
       document.getElementById('partsBulk').value = '';
       document.getElementById('parseHint').textContent = '';
@@ -1582,7 +1675,7 @@
     return {
       m: mode,
       rot: document.getElementById('allowRotateInput').checked,
-      p: partRows.map(r => [r.value, r.qty]),
+      p: partRows.map(r => [r.value, r.qty, r.label || '']),
       k: document.getElementById('kerfInput').value,
       ku: document.getElementById('kerfUnitSelect').value,
       u: document.getElementById('unitSelect').value,
@@ -1612,7 +1705,8 @@
         partRows = state.p.map((row, i) => ({
           id: i+1,
           value: row[0] || '',
-          qty: (row[1] !== undefined && row[1] !== '' && parseInt(row[1],10) > 0) ? parseInt(row[1],10) : 1
+          qty: (row[1] !== undefined && row[1] !== '' && parseInt(row[1],10) > 0) ? parseInt(row[1],10) : 1,
+          label: row[2] || ''
         }));
         nextPartId = partRows.length + 1;
       } else if (typeof state.c === 'string' && state.c.trim()){
@@ -1625,8 +1719,8 @@
           if (!map.has(key)){ map.set(key, { value, qty: 1 }); order.push(key); }
           else { map.get(key).qty += 1; }
         });
-        partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, qty: map.get(k).qty }));
-        if (!partRows.length) partRows = [ { id: 1, value: '', qty: 1 } ];
+        partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, label: '', qty: map.get(k).qty }));
+        if (!partRows.length) partRows = [ { id: 1, value: '', label: '', qty: 1 } ];
         nextPartId = partRows.length + 1;
       }
       if (Array.isArray(state.s) && state.s.length){
@@ -1692,7 +1786,7 @@
     const kerfDisplay = isFinite(kerfVal) && kerfVal >= 0 ? kerfVal : 0;
     const kerfBase = toBase(kerfDisplay, kerfUnit());
 
-    const piecesBase = pieces.map(p => ({ id: p.id, length: toBase(p.length, cutUnit) }));
+    const piecesBase = pieces.map(p => ({ id: p.id, length: toBase(p.length, cutUnit), label: p.label }));
 
     const stockTypes = stockRows
       .map(r => {
@@ -1760,7 +1854,7 @@
     const kerfBase = toBase(kerfDisplay, kerfUnit());
     const allowRotate = document.getElementById('allowRotateInput').checked;
 
-    const piecesBase = pieces.map(p => ({ id: p.id, w: toBase(p.w, cutUnit), h: toBase(p.h, cutUnit) }));
+    const piecesBase = pieces.map(p => ({ id: p.id, w: toBase(p.w, cutUnit), h: toBase(p.h, cutUnit), label: p.label }));
 
     const stockTypes = stockRows
       .map(r => {
@@ -1818,9 +1912,12 @@
     document.getElementById('purchaseTable').innerHTML = '';
     document.getElementById('binsWrap').innerHTML = '';
     document.getElementById('legendRow').innerHTML = '';
+    document.getElementById('remnantsWrap').innerHTML = '';
+    document.getElementById('remnantsTitle').style.display = 'none';
     document.getElementById('copyBtn').style.display = 'none';
     document.getElementById('csvBtn').style.display = 'none';
     document.getElementById('printBtn').style.display = 'none';
+    document.getElementById('printLabelsBtn').style.display = 'none';
   }
 
   function renderResults(result, kerfBase, cutUnit){
@@ -1829,6 +1926,7 @@
     document.getElementById('copyBtn').style.display = '';
     document.getElementById('csvBtn').style.display = '';
     document.getElementById('printBtn').style.display = '';
+    document.getElementById('printLabelsBtn').style.display = '';
 
     const bins = result.bins;
 
@@ -1900,6 +1998,8 @@
     bins.forEach((b, i) => {
       binsWrap.appendChild(renderBinCard(b, i, kerfBase, cutUnit));
     });
+
+    renderRemnants();
   }
 
   function statCard(label, value, sub, cls){
@@ -1949,7 +2049,7 @@
       const dispLen = fmt(fromBase(p.length, cutUnit));
       seg.style.width = widthPct + '%';
       seg.style.background = colorFor(dispLen);
-      seg.title = dispLen + ' ' + cutUnit;
+      seg.title = (p.label ? p.label + ' — ' : '') + dispLen + ' ' + cutUnit;
       if (widthPct > 6) seg.textContent = dispLen;
       bar.appendChild(seg);
     });
@@ -1969,16 +2069,18 @@
     table.className = 'cut-order-table';
     let runningBase = 0;
     let bodyRows = '';
+    const anyLabel = bin.pieces.some(p => p.label);
     bin.pieces.forEach((p, i) => {
       if (i > 0) runningBase += kerfBase;
       runningBase += p.length;
       bodyRows += '<tr>' +
         '<td>' + (i+1) + '</td>' +
+        (anyLabel ? '<td>' + escapeHtml(p.label || '') + '</td>' : '') +
         '<td>' + fmt(fromBase(p.length, cutUnit)) + ' ' + cutUnit + '</td>' +
         '<td>' + fmt(fromBase(runningBase, cutUnit)) + ' ' + cutUnit + '</td>' +
         '</tr>';
     });
-    table.innerHTML = '<tr><th>Cut</th><th>Length</th><th>Mark at</th></tr>' + bodyRows;
+    table.innerHTML = '<tr><th>Cut</th>' + (anyLabel ? '<th>Label</th>' : '') + '<th>Length</th><th>Mark at</th></tr>' + bodyRows;
     card.appendChild(table);
 
     return card;
@@ -1991,6 +2093,7 @@
     document.getElementById('copyBtn').style.display = '';
     document.getElementById('csvBtn').style.display = '';
     document.getElementById('printBtn').style.display = '';
+    document.getElementById('printLabelsBtn').style.display = '';
 
     const bins = result.bins;
     const allowRotate = document.getElementById('allowRotateInput').checked;
@@ -2066,6 +2169,8 @@
     bins.forEach((b, i) => {
       binsWrap.appendChild(renderSheetBinCard(b, i, cutUnit));
     });
+
+    renderRemnants();
   }
 
   function renderSheetBinCard(bin, index, cutUnit){
@@ -2097,11 +2202,13 @@
     bin.placements.forEach(p => {
       const rx = p.x * sx, ry = p.y * sy, rw = p.w * sx, rh = p.h * sy;
       const dw = fmt(fromBase(p.w, cutUnit)), dh = fmt(fromBase(p.h, cutUnit));
-      svg += '<rect class="sheet-piece-rect" x="' + rx.toFixed(2) + '" y="' + ry.toFixed(2) + '" width="' + rw.toFixed(2) + '" height="' + rh.toFixed(2) + '" fill="' + colorFor(dimKeyOf(p.w, p.h, cutUnit)) + '"><title>' + dw + ' x ' + dh + ' ' + cutUnit + (p.rotated ? ' (rotated)' : '') + '</title></rect>';
+      const titleTxt = (p.label ? p.label + ' — ' : '') + dw + ' x ' + dh + ' ' + cutUnit + (p.rotated ? ' (rotated)' : '');
+      svg += '<rect class="sheet-piece-rect" x="' + rx.toFixed(2) + '" y="' + ry.toFixed(2) + '" width="' + rw.toFixed(2) + '" height="' + rh.toFixed(2) + '" fill="' + colorFor(dimKeyOf(p.w, p.h, cutUnit)) + '"><title>' + escapeHtml(titleTxt) + '</title></rect>';
       const minSide = Math.min(rw, rh);
       if (minSide > 34){
         const fontSize = Math.max(9, Math.min(15, minSide / 4));
-        svg += '<text class="sheet-piece-label" x="' + (rx+rw/2).toFixed(2) + '" y="' + (ry+rh/2).toFixed(2) + '" font-size="' + fontSize.toFixed(1) + '">' + dw + ' x ' + dh + '</text>';
+        const glyph = p.label ? escapeHtml(p.label) : (dw + ' x ' + dh);
+        svg += '<text class="sheet-piece-label" x="' + (rx+rw/2).toFixed(2) + '" y="' + (ry+rh/2).toFixed(2) + '" font-size="' + fontSize.toFixed(1) + '">' + glyph + '</text>';
       }
     });
     svg += '</svg>';
@@ -2112,6 +2219,7 @@
     const table = document.createElement('table');
     table.className = 'cut-order-table';
     let bodyRows = '';
+    const anyLabel = bin.placements.some(p => p.label);
     bin.placements
       .slice()
       .sort((a,b) => (b.w*b.h) - (a.w*a.h))
@@ -2119,11 +2227,12 @@
         const dw = fmt(fromBase(p.w, cutUnit)), dh = fmt(fromBase(p.h, cutUnit));
         bodyRows += '<tr>' +
           '<td>' + (i+1) + '</td>' +
+          (anyLabel ? '<td>' + escapeHtml(p.label || '') + '</td>' : '') +
           '<td>' + dw + ' x ' + dh + ' ' + cutUnit + '</td>' +
           '<td>' + (p.rotated ? 'Yes' : 'No') + '</td>' +
           '</tr>';
       });
-    table.innerHTML = '<tr><th>Part</th><th>Size</th><th>Rotated</th></tr>' + bodyRows;
+    table.innerHTML = '<tr><th>Part</th>' + (anyLabel ? '<th>Label</th>' : '') + '<th>Size</th><th>Rotated</th></tr>' + bodyRows;
     card.appendChild(table);
 
     return card;
@@ -2144,7 +2253,7 @@
         text += 'SHEET ' + (i+1) + ' — ' + label + ' (' + sizeDisp + ')\n';
         b.placements.slice().sort((a,b2) => (b2.w*b2.h)-(a.w*a.h)).forEach((p, j) => {
           const dw = fmt(fromBase(p.w, cutUnit)), dh = fmt(fromBase(p.h, cutUnit));
-          text += '  Part ' + (j+1) + ': ' + dw + ' x ' + dh + ' ' + cutUnit + ' at (' + fmt(fromBase(p.x, cutUnit)) + ', ' + fmt(fromBase(p.y, cutUnit)) + ')' + (p.rotated ? ' [rotated]' : '') + '\n';
+          text += '  Part ' + (j+1) + ': ' + (p.label ? p.label + ' — ' : '') + dw + ' x ' + dh + ' ' + cutUnit + ' at (' + fmt(fromBase(p.x, cutUnit)) + ', ' + fmt(fromBase(p.y, cutUnit)) + ')' + (p.rotated ? ' [rotated]' : '') + '\n';
         });
         const sheetArea = st.width * st.height;
         const remnantBase = sheetArea - b.usedArea - b.kerfArea;
@@ -2164,7 +2273,7 @@
         b.pieces.forEach((p, j) => {
           if (j > 0) runningBase += kerfBase;
           runningBase += p.length;
-          text += '  Cut ' + (j+1) + ': ' + fmt(fromBase(p.length, cutUnit)) + ' ' + cutUnit + '  (mark at ' + fmt(fromBase(runningBase, cutUnit)) + ' ' + cutUnit + ')\n';
+          text += '  Cut ' + (j+1) + ': ' + (p.label ? p.label + ' — ' : '') + fmt(fromBase(p.length, cutUnit)) + ' ' + cutUnit + '  (mark at ' + fmt(fromBase(runningBase, cutUnit)) + ' ' + cutUnit + ')\n';
         });
         const remnantBase = st.length - b.used;
         text += '  Remnant: ' + fmt(fromBase(remnantBase, cutUnit)) + ' ' + cutUnit + '\n\n';
@@ -2185,6 +2294,126 @@
   document.getElementById('printBtn').addEventListener('click', () => {
     window.print();
   });
+
+  // ---------- remnants summary (all offcuts together) ----------
+  function renderRemnants(){
+    const wrap = document.getElementById('remnantsWrap');
+    const title = document.getElementById('remnantsTitle');
+    wrap.innerHTML = '';
+    if (!lastResult){ title.style.display = 'none'; return; }
+    title.style.display = '';
+    if (lastResult.mode === 'sheet'){
+      title.textContent = 'All remnants — leftover regions per sheet';
+      renderRemnantsSheet(wrap);
+    } else {
+      title.textContent = 'All remnants — grouped by length';
+      renderRemnantsLinear(wrap);
+    }
+  }
+
+  function renderRemnantsLinear(wrap){
+    const { result, cutUnit } = lastResult;
+    const map = new Map();
+    let totalBase = 0, count = 0;
+    result.bins.forEach(b => {
+      const rem = b.stockType.length - b.used;
+      if (rem > 1e-6){
+        const disp = fmt(fromBase(rem, cutUnit));
+        map.set(disp, (map.get(disp) || 0) + 1);
+        totalBase += rem; count++;
+      }
+    });
+    if (!map.size){ wrap.innerHTML = '<div class="hint">No usable remnants — every stock piece was fully consumed.</div>'; return; }
+    const entries = Array.from(map.entries()).sort((a,b) => parseFloat(b[0]) - parseFloat(a[0]));
+    let html = '<table><tr><th>Remnant length</th><th>Count</th></tr>';
+    entries.forEach(([len, c]) => { html += '<tr><td>' + len + ' ' + cutUnit + '</td><td>' + c + '</td></tr>'; });
+    html += '<tr><td style="font-family:var(--font-display);font-weight:600;">' + count + ' offcut' + (count===1?'':'s') + '</td>' +
+            '<td style="font-family:var(--font-display);font-weight:600;">' + fmt(fromBase(totalBase, cutUnit)) + ' ' + cutUnit + ' total</td></tr>';
+    html += '</table>';
+    wrap.innerHTML = html;
+  }
+
+  function renderRemnantsSheet(wrap){
+    const { result, cutUnit } = lastResult;
+    let html = '<div class="remnant-sheets">';
+    result.bins.forEach((b, i) => {
+      const st = b.stockType;
+      const VBW = 300, VBH = st.width > 0 ? Math.round(VBW * (st.height / st.width)) : VBW;
+      const sx = VBW / st.width, sy = VBH / st.height;
+      let svg = '<svg viewBox="0 0 ' + VBW + ' ' + VBH + '" xmlns="http://www.w3.org/2000/svg">';
+      svg += '<rect x="0" y="0" width="' + VBW + '" height="' + VBH + '" class="remnant-sheet-outline"/>';
+      (b.freeRects || []).forEach(r => {
+        if (r.w <= 1e-6 || r.h <= 1e-6) return;
+        const rx = r.x*sx, ry = r.y*sy, rw = r.w*sx, rh = r.h*sy;
+        const dw = fmt(fromBase(r.w, cutUnit)), dh = fmt(fromBase(r.h, cutUnit));
+        svg += '<rect class="remnant-free" x="' + rx.toFixed(2) + '" y="' + ry.toFixed(2) + '" width="' + rw.toFixed(2) + '" height="' + rh.toFixed(2) + '"><title>' + dw + ' x ' + dh + ' ' + cutUnit + '</title></rect>';
+        if (Math.min(rw, rh) > 28){
+          const fs = Math.max(8, Math.min(13, Math.min(rw, rh) / 4));
+          svg += '<text class="remnant-free-label" x="' + (rx+rw/2).toFixed(2) + '" y="' + (ry+rh/2).toFixed(2) + '" font-size="' + fs.toFixed(1) + '">' + dw + '×' + dh + '</text>';
+        }
+      });
+      svg += '</svg>';
+      const size = fmt(st.origWidth) + ' x ' + fmt(st.origHeight) + ' ' + st.unit;
+      html += '<div class="remnant-sheet"><div class="cap">Sheet ' + String(i+1).padStart(2,'0') + ' · ' + escapeHtml(st.label || size) + '</div>' +
+              '<div class="remnant-svg-wrap">' + svg + '</div></div>';
+    });
+    html += '</div>';
+    wrap.innerHTML = html;
+  }
+
+  // ---------- printable label sheet, in cut order ----------
+  function labelCard(name, dim, meta){
+    const primary = name || dim;
+    return '<div class="label-card">' +
+      '<div class="lc-name">' + escapeHtml(primary) + '</div>' +
+      (name ? '<div class="lc-dim">' + escapeHtml(dim) + '</div>' : '') +
+      '<div class="lc-meta">' + escapeHtml(meta) + '</div>' +
+    '</div>';
+  }
+
+  function buildLabelSheet(){
+    const el = document.getElementById('labelSheet');
+    if (!lastResult){ el.innerHTML = ''; return; }
+    let html = '<h2>Cut-order labels</h2>';
+    html += '<div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);margin-bottom:10px;">' +
+            (lastResult.mode === 'sheet' ? 'Sheet nesting' : 'Linear cut') + ' · generated ' + new Date().toLocaleString() + '</div>';
+    if (lastResult.mode === 'sheet'){
+      const { result, cutUnit } = lastResult;
+      result.bins.forEach((b, i) => {
+        const st = b.stockType;
+        const size = fmt(st.origWidth) + ' x ' + fmt(st.origHeight) + ' ' + st.unit;
+        html += '<div class="label-grid"><div class="label-stock-head">Sheet ' + String(i+1).padStart(2,'0') + ' — ' + escapeHtml(st.label || size) + '</div>';
+        b.placements.slice().sort((a,b2) => (b2.w*b2.h) - (a.w*a.h)).forEach((p, j) => {
+          const dw = fmt(fromBase(p.w, cutUnit)), dh = fmt(fromBase(p.h, cutUnit));
+          html += labelCard(p.label, dw + ' x ' + dh + ' ' + cutUnit, 'Sheet ' + (i+1) + ' · part ' + (j+1) + (p.rotated ? ' · rotated' : ''));
+        });
+        html += '</div>';
+      });
+    } else {
+      const { result, cutUnit } = lastResult;
+      result.bins.forEach((b, i) => {
+        const st = b.stockType;
+        const len = fmt(st.origLength) + ' ' + st.unit;
+        html += '<div class="label-grid"><div class="label-stock-head">Stock ' + String(i+1).padStart(2,'0') + ' — ' + escapeHtml(st.label || len) + '</div>';
+        b.pieces.forEach((p, j) => {
+          const dl = fmt(fromBase(p.length, cutUnit));
+          html += labelCard(p.label, dl + ' ' + cutUnit, 'Stock ' + (i+1) + ' · cut ' + (j+1) + ' of ' + b.pieces.length);
+        });
+        html += '</div>';
+      });
+    }
+    el.innerHTML = html;
+  }
+
+  document.getElementById('printLabelsBtn').addEventListener('click', () => {
+    if (!lastResult) return;
+    buildLabelSheet();
+    document.body.classList.add('label-print-mode');
+    window.print();                                        // blocks until the dialog closes on desktop
+    document.body.classList.remove('label-print-mode');
+  });
+  // backstop for browsers where print() returns before the dialog closes
+  window.addEventListener('afterprint', () => document.body.classList.remove('label-print-mode'));
 
   // ---------- CSV export ----------
   function csvEscape(v){
@@ -2221,12 +2450,12 @@
       rows.push(['', '', '', 'Total', total.toFixed(2)]);
       rows.push([]);
       rows.push(['CUT PLAN']);
-      rows.push(['Sheet no', 'Sheet label', 'Sheet size', 'Part no', 'Part W (' + cutUnit + ')', 'Part H (' + cutUnit + ')', 'Rotated', 'X (' + cutUnit + ')', 'Y (' + cutUnit + ')']);
+      rows.push(['Sheet no', 'Sheet label', 'Sheet size', 'Part no', 'Part label', 'Part W (' + cutUnit + ')', 'Part H (' + cutUnit + ')', 'Rotated', 'X (' + cutUnit + ')', 'Y (' + cutUnit + ')']);
       result.bins.forEach((b, i) => {
         const st = b.stockType;
         const size = fmt(st.origWidth) + ' x ' + fmt(st.origHeight) + ' ' + st.unit;
         b.placements.slice().sort((a,b2) => (b2.w*b2.h) - (a.w*a.h)).forEach((p, j) => {
-          rows.push([i+1, st.label || size, size, j+1, fmt(fromBase(p.w, cutUnit)), fmt(fromBase(p.h, cutUnit)), p.rotated ? 'Yes' : 'No', fmt(fromBase(p.x, cutUnit)), fmt(fromBase(p.y, cutUnit))]);
+          rows.push([i+1, st.label || size, size, j+1, p.label || '', fmt(fromBase(p.w, cutUnit)), fmt(fromBase(p.h, cutUnit)), p.rotated ? 'Yes' : 'No', fmt(fromBase(p.x, cutUnit)), fmt(fromBase(p.y, cutUnit))]);
         });
       });
     } else {
@@ -2253,7 +2482,7 @@
       rows.push(['', '', '', 'Total', total.toFixed(2)]);
       rows.push([]);
       rows.push(['CUT PLAN']);
-      rows.push(['Stock no', 'Stock label', 'Stock length', 'Cut no', 'Cut length (' + cutUnit + ')', 'Mark at (' + cutUnit + ')']);
+      rows.push(['Stock no', 'Stock label', 'Stock length', 'Cut no', 'Part label', 'Cut length (' + cutUnit + ')', 'Mark at (' + cutUnit + ')']);
       result.bins.forEach((b, i) => {
         const st = b.stockType;
         const len = fmt(st.origLength) + ' ' + st.unit;
@@ -2261,7 +2490,7 @@
         b.pieces.forEach((p, j) => {
           if (j > 0) running += kerfBase;
           running += p.length;
-          rows.push([i+1, st.label || len, len, j+1, fmt(fromBase(p.length, cutUnit)), fmt(fromBase(running, cutUnit))]);
+          rows.push([i+1, st.label || len, len, j+1, p.label || '', fmt(fromBase(p.length, cutUnit)), fmt(fromBase(running, cutUnit))]);
         });
       });
     }
@@ -2292,7 +2521,7 @@
   // ---------- reset ----------
   function resetAll(){
     if (!window.confirm('Clear all inputs and results?')) return;
-    partRows = [ { id: 1, value: '', qty: 1 } ];
+    partRows = [ { id: 1, value: '', label: '', qty: 1 } ];
     nextPartId = 2;
     stockRows = [ { id: 1, length: '', width: '', height: '', unit: 'in', price: '', qty: '', label: '' } ];
     nextStockId = 2;
