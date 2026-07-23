@@ -813,6 +813,21 @@
   .label-card .lc-name{ font-family:var(--font-display); font-weight:600; font-size:14px; line-height:1.2; }
   .label-card .lc-dim{ font-family:var(--font-mono); font-size:12px; margin-top:2px; }
   .label-card .lc-meta{ font-family:var(--font-mono); font-size:10px; color:var(--ink-soft); margin-top:3px; }
+  /* a colored grouping band on the left edge — small, to save ink and keep text legible */
+  .label-card.has-band{ position:relative; padding-left:18px; }
+  .label-card.has-band::before{
+    content:"";
+    position:absolute; left:0; top:0; bottom:0;
+    width:10px;
+    background:var(--band);
+    border-radius:6px 0 0 6px;
+  }
+
+  /* small color swatch shown in the parts list and field editor */
+  .lbl-dot{ display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:middle; border:1px solid rgba(0,0,0,0.15); }
+  .pf-color{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .pf-color label{ margin-bottom:0; flex-shrink:0; }
+  .pf-color input{ background:#fff; font-size:12px; }
 
   .floating-actions{
     position:fixed;
@@ -1029,7 +1044,7 @@
   let lastResult = null;
 
   // parts list: one row per unique value+fields, with an editable quantity (default 1)
-  let partRows = [ { id: 1, value: '', qty: 1, fields: [] } ];
+  let partRows = [ { id: 1, value: '', qty: 1, fields: [], color: '' } ];
   let nextPartId = 2;
   const expandedParts = new Set(); // part ids whose info-field editor is open
   let colRoles = null;        // role per CSV column when the paste box holds a header row
@@ -1077,6 +1092,27 @@
   function dimKeyOf(pw, ph, cutUnit){
     const a = parseFloat(fmt(fromBase(pw, cutUnit))), b = parseFloat(fmt(fromBase(ph, cutUnit)));
     return Math.min(a,b) + ' x ' + Math.max(a,b);
+  }
+
+  // ---------- label colors (grouping) ----------
+  // A color-column value can be a literal color (hex or common name) used as-is,
+  // or any group key (e.g. "Zone A") that gets a stable palette color.
+  const CSS_NAMES = new Set(['red','blue','green','yellow','orange','purple','black','white','gray','grey','pink','brown','cyan','magenta','teal','navy','maroon','olive','lime','aqua','silver','gold','beige','tan','violet','indigo','turquoise','salmon','coral','crimson']);
+  function isCssColor(v){
+    v = String(v).trim();
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v) || /^rgb/i.test(v) || CSS_NAMES.has(v.toLowerCase());
+  }
+  // stable group-key -> palette color map, built from the parts list in order
+  function buildPartColorMap(){
+    const m = new Map(); let idx = 0;
+    partRows.forEach(r => { const v = String(r.color || '').trim(); if (!v || isCssColor(v)) return; const k = v.toLowerCase(); if (!m.has(k)) m.set(k, paletteColor(idx++)); });
+    return m;
+  }
+  function resolveColor(raw, map){
+    const v = String(raw || '').trim();
+    if (!v) return null;
+    if (isCssColor(v)) return v;
+    return (map && map.get(v.toLowerCase())) || paletteColor(0);
   }
 
   // ---------- parsing ----------
@@ -1150,7 +1186,7 @@
   // merge only when the size AND all fields match; field-less rows merge by size.
   function titleCase(s){ return String(s).replace(/\b\w/g, c => c.toUpperCase()); }
   function fieldsKey(fields){ return (fields || []).map(f => String(f.name||'').trim().toLowerCase() + '=' + String(f.value||'').trim().toLowerCase()).filter(x => x !== '=').join('|'); }
-  function rowKey(value, fields){ return normKey(value) + '||' + fieldsKey(fields); }
+  function rowKey(value, fields, color){ return normKey(value) + '||' + fieldsKey(fields) + '||' + String(color || '').trim().toLowerCase(); }
   // Compose a printable label from a row's fields: a name-ish field shows its
   // value raw, the rest render as "Header: value" (e.g. "RIB-A · Bend Radius: 12").
   function labelString(fields){
@@ -1175,6 +1211,7 @@
     head.className = 'parts-head';
     head.innerHTML = '<span>' + (mode === 'sheet' ? 'Size (W x H)' : 'Length') + '</span><span>Label / info</span><span>Qty</span><span></span>';
     wrap.appendChild(head);
+    const cmap = buildPartColorMap();
     partRows.forEach(row => {
       row.fields = row.fields || [];
       const div = document.createElement('div');
@@ -1184,17 +1221,21 @@
       const nFields = row.fields.filter(f => String(f.value).trim() !== '').length;
       const summary = labelString(row.fields);
       const summaryTxt = summary || (nFields ? nFields + ' field' + (nFields===1?'':'s') : '+ info fields');
+      const swatch = resolveColor(row.color, cmap);
+      const dot = swatch ? '<span class="lbl-dot" style="background:' + swatch + '"></span>' : '';
 
       let html =
         '<div class="part-main">' +
           '<input type="text" data-field="value" value="' + esc(row.value) + '" placeholder="' + (mode === 'sheet' ? '24 x 36' : '38') + '">' +
-          '<button type="button" class="pf-summary' + (summary ? '' : ' empty') + (open ? ' open' : '') + '" data-action="toggle-fields" title="' + esc(summary || 'Add info fields') + '">' + escapeHtml(summaryTxt) + '</button>' +
+          '<button type="button" class="pf-summary' + (summary ? '' : ' empty') + (open ? ' open' : '') + '" data-action="toggle-fields" title="' + esc(summary || 'Add info fields') + '">' + dot + escapeHtml(summaryTxt) + '</button>' +
           '<input type="number" min="1" step="1" data-field="qty" value="' + row.qty + '">' +
           '<button class="row-remove" data-action="remove-part" title="Remove this part" ' + (partRows.length <= 1 ? 'disabled' : '') + '>×</button>' +
         '</div>';
 
       if (open){
         html += '<div class="part-fields">';
+        html += '<div class="pf-color"><label>Color ' + (swatch ? '<span class="lbl-dot" style="background:' + swatch + '"></span>' : '') + '</label>' +
+          '<input type="text" data-color="1" value="' + esc(row.color || '') + '" placeholder="name, #hex, or a group like &quot;Zone A&quot;"></div>';
         row.fields.forEach((f, fi) => {
           html += '<div class="pf-row">' +
             '<input type="text" data-fi="' + fi + '" data-fk="name" value="' + esc(f.name || '') + '" placeholder="field">' +
@@ -1223,6 +1264,8 @@
       if (row.fields[fi]){ row.fields[fi][e.target.dataset.fk] = e.target.value; updateHash(); }
       return;
     }
+    // the label-color input
+    if (e.target.dataset.color !== undefined){ row.color = e.target.value; updateHash(); return; }
     const field = e.target.dataset.field;
     if (!field) return;
     row[field] = e.target.value;
@@ -1264,8 +1307,10 @@
   function autoRoles(lc){
     const roles = lc.map(() => 'info');
     let qtySet=false, lenSet=false, wSet=false, hSet=false, sizeSet=false;
+    let colorSet=false;
     lc.forEach((h, i) => {
       if (!qtySet && /^(qty|quantity|count)$/.test(h)){ roles[i]='qty'; qtySet=true; return; }
+      if (!colorSet && /^(colou?r|group|band|zone)$/.test(h)){ roles[i]='color'; colorSet=true; return; }
       if (mode === 'sheet'){
         if (!sizeSet && /^(size|dim|dimension|dimensions)$/.test(h)){ roles[i]='size'; sizeSet=true; return; }
         if (!wSet && /^(width|w)$/.test(h)){ roles[i]='width'; wSet=true; return; }
@@ -1309,7 +1354,7 @@
       const dataRows = rows.slice(1);
       const usable = roles && roles.length === lc.length && roles.some(r => r==='length' || r==='width' || r==='size');
       const colr = usable ? roles.slice() : rolesFor(lc, dataRows);
-      const idxLen = colr.indexOf('length'), idxW = colr.indexOf('width'), idxH = colr.indexOf('height'), idxSize = colr.indexOf('size'), idxQty = colr.indexOf('qty');
+      const idxLen = colr.indexOf('length'), idxW = colr.indexOf('width'), idxH = colr.indexOf('height'), idxSize = colr.indexOf('size'), idxQty = colr.indexOf('qty'), idxColor = colr.indexOf('color');
       dataRows.forEach(line => {
         const cells = line.split(/[,\t]/).map(c => c.trim());
         if (cells.every(c => c === '')) return;
@@ -1325,9 +1370,10 @@
         }
         if (idxQty >= 0 && isNumeric(cells[idxQty])) qty = parseInt(cells[idxQty], 10);
         if (value === null){ warnings.push('Couldn\'t read row "' + line + '".'); return; }
+        const color = idxColor >= 0 ? (cells[idxColor] || '') : '';
         const fields = [];
         colr.forEach((r, i) => { if (r !== 'info') return; const v = (cells[i] || '').trim(); if (v) fields.push({ name: rawHeader[i] || '', value: v }); });
-        seeds.push({ value, fields, qty: qty > 0 ? qty : 1 });
+        seeds.push({ value, fields, qty: qty > 0 ? qty : 1, color });
       });
     } else {
       rows.forEach(line => {
@@ -1349,7 +1395,7 @@
         if (value === null){ warnings.push('Couldn\'t read row "' + line + '".'); return; }
         const fields = [];
         cells.forEach((c, i) => { if (consumed.has(i)) return; const v = (c || '').trim(); if (v) fields.push({ name: '', value: v }); });
-        seeds.push({ value, fields, qty: qty > 0 ? qty : 1 });
+        seeds.push({ value, fields, qty: qty > 0 ? qty : 1, color: '' });
       });
     }
     return { seeds, warnings };
@@ -1357,8 +1403,8 @@
 
   // ---------- column mapper UI ----------
   const ROLE_OPTS = {
-    linear: [['length','Length'],['qty','Qty'],['info','Info'],['ignore','Ignore']],
-    sheet:  [['width','Width'],['height','Height'],['size','Size (WxH)'],['qty','Qty'],['info','Info'],['ignore','Ignore']]
+    linear: [['length','Length'],['qty','Qty'],['color','Color'],['info','Info'],['ignore','Ignore']],
+    sheet:  [['width','Width'],['height','Height'],['size','Size (WxH)'],['qty','Qty'],['color','Color'],['info','Info'],['ignore','Ignore']]
   };
 
   function refreshColMap(){
@@ -1399,15 +1445,15 @@
   // Fold {value,fields,qty} seeds into the rows, merging matches (size + fields).
   function mergeSeeds(seeds){
     const order = [], map = new Map();
-    const seed = (value, fields, qty) => {
-      const key = rowKey(value, fields);
-      if (!map.has(key)){ map.set(key, { value, fields: fields || [], qty }); order.push(key); }
-      else { const e = map.get(key); e.qty += qty; if (!(e.fields && e.fields.length) && fields && fields.length) e.fields = fields; }
+    const seed = (value, fields, qty, color) => {
+      const key = rowKey(value, fields, color);
+      if (!map.has(key)){ map.set(key, { value, fields: fields || [], qty, color: color || '' }); order.push(key); }
+      else { const e = map.get(key); e.qty += qty; if (!(e.fields && e.fields.length) && fields && fields.length) e.fields = fields; if (!e.color && color) e.color = color; }
     };
-    partRows.forEach(r => { if (String(r.value).trim()) seed(String(r.value).trim(), r.fields || [], parseInt(r.qty,10) || 0); });
-    seeds.forEach(s => seed(s.value, s.fields || [], s.qty > 0 ? s.qty : 1));
-    partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, fields: map.get(k).fields || [], qty: map.get(k).qty }));
-    if (!partRows.length) partRows = [ { id: 1, value: '', qty: 1, fields: [] } ];
+    partRows.forEach(r => { if (String(r.value).trim()) seed(String(r.value).trim(), r.fields || [], parseInt(r.qty,10) || 0, r.color || ''); });
+    seeds.forEach(s => seed(s.value, s.fields || [], s.qty > 0 ? s.qty : 1, s.color || ''));
+    partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, fields: map.get(k).fields || [], qty: map.get(k).qty, color: map.get(k).color || '' }));
+    if (!partRows.length) partRows = [ { id: 1, value: '', qty: 1, fields: [], color: '' } ];
     nextPartId = partRows.length + 1;
   }
 
@@ -1421,7 +1467,7 @@
     } else {
       const parsed = mode === 'sheet' ? parseSheetList(text) : parseCutlist(text);
       warnings = parsed.warnings;
-      seeds = parsed.pieces.map(p => ({ value: mode === 'sheet' ? (fmt(p.w) + ' x ' + fmt(p.h)) : fmt(p.length), fields: [], qty: 1 }));
+      seeds = parsed.pieces.map(p => ({ value: mode === 'sheet' ? (fmt(p.w) + ' x ' + fmt(p.h)) : fmt(p.length), fields: [], qty: 1, color: '' }));
     }
     mergeSeeds(seeds);
     renderPartsTable();
@@ -1451,10 +1497,12 @@
     const pieces = [];
     const warnings = [];
     let idCounter = 0;
+    const cmap = buildPartColorMap();
     partRows.forEach(r => {
       const value = String(r.value).trim();
       if (!value) return;
       const label = labelString(r.fields);
+      const colorCss = resolveColor(r.color, cmap);
       const q = parseInt(r.qty, 10);
       const qty = (isFinite(q) && q > 0) ? q : 1;
       // a labeled row with qty > 1 auto-numbers its pieces (RIB-A #1, #2, …)
@@ -1464,12 +1512,12 @@
         if (!m){ warnings.push('Couldn\'t read "' + value + '" — expected "W x H".'); return; }
         const w = parseFloat(m[1]), h = parseFloat(m[2]);
         if (w <= 0 || h <= 0){ warnings.push('Skipped "' + value + '" — dimensions must be greater than zero.'); return; }
-        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, w, h, label: pieceLabel(i) });
+        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, w, h, label: pieceLabel(i), colorCss });
       } else {
         if (!/^\d+(?:\.\d+)?$/.test(value)){ warnings.push('Couldn\'t read "' + value + '" — expected a number.'); return; }
         const length = parseFloat(value);
         if (length <= 0){ warnings.push('Skipped "' + value + '" — must be greater than zero.'); return; }
-        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, length, label: pieceLabel(i) });
+        for (let i=0;i<qty;i++) pieces.push({ id: idCounter++, length, label: pieceLabel(i), colorCss });
       }
     });
     return { pieces, warnings };
@@ -1523,7 +1571,7 @@
   })();
 
   document.getElementById('addPartBtn').addEventListener('click', () => {
-    partRows.push({ id: nextPartId++, value: '', qty: 1, fields: [] });
+    partRows.push({ id: nextPartId++, value: '', qty: 1, fields: [], color: '' });
     renderPartsTable();
     updateHash();
   });
@@ -1724,7 +1772,7 @@
       const choice = chooseFreeRect(freeRects, p.w, p.h, kerf, allowRotate);
       if (!choice){ unplaced.push(p); continue; }
       const rect = freeRects[choice.idx];
-      placements.push({ id: p.id, x: rect.x, y: rect.y, w: choice.placedW, h: choice.placedH, rotated: choice.rotated, label: p.label });
+      placements.push({ id: p.id, x: rect.x, y: rect.y, w: choice.placedW, h: choice.placedH, rotated: choice.rotated, label: p.label, colorCss: p.colorCss });
       const newRects = splitFreeRect(rect, choice.consumedW, choice.consumedH);
       freeRects.splice(choice.idx, 1, ...newRects);
       usedArea += p.w * p.h;
@@ -1768,7 +1816,7 @@
       if (bestBinIdx >= 0){
         const b = bins[bestBinIdx];
         const rect = b.freeRects[bestChoice.idx];
-        b.placements.push({ id: piece.id, x: rect.x, y: rect.y, w: bestChoice.placedW, h: bestChoice.placedH, rotated: bestChoice.rotated, label: piece.label });
+        b.placements.push({ id: piece.id, x: rect.x, y: rect.y, w: bestChoice.placedW, h: bestChoice.placedH, rotated: bestChoice.rotated, label: piece.label, colorCss: piece.colorCss });
         const newRects = splitFreeRect(rect, bestChoice.consumedW, bestChoice.consumedH);
         b.freeRects.splice(bestChoice.idx, 1, ...newRects);
         b.usedArea += piece.w * piece.h;
@@ -1956,7 +2004,7 @@
     applyModeCopy();
     if (!opts.silent){
       // linear lengths and sheet sizes aren't interchangeable — start clean
-      partRows = [ { id: 1, value: '', qty: 1, fields: [] } ];
+      partRows = [ { id: 1, value: '', qty: 1, fields: [], color: '' } ];
       nextPartId = 2;
       document.getElementById('partsBulk').value = '';
       document.getElementById('parseHint').textContent = '';
@@ -1978,7 +2026,7 @@
     return {
       m: mode,
       rot: document.getElementById('allowRotateInput').checked,
-      p: partRows.map(r => [r.value, r.qty, (r.fields || []).map(f => [f.name || '', f.value || ''])]),
+      p: partRows.map(r => [r.value, r.qty, (r.fields || []).map(f => [f.name || '', f.value || '']), r.color || '']),
       k: document.getElementById('kerfInput').value,
       ku: document.getElementById('kerfUnitSelect').value,
       u: document.getElementById('unitSelect').value,
@@ -2013,7 +2061,8 @@
             id: i+1,
             value: row[0] || '',
             qty: (row[1] !== undefined && row[1] !== '' && parseInt(row[1],10) > 0) ? parseInt(row[1],10) : 1,
-            fields: fields
+            fields: fields,
+            color: (typeof row[3] === 'string') ? row[3] : ''
           };
         });
         nextPartId = partRows.length + 1;
@@ -2027,8 +2076,8 @@
           if (!map.has(key)){ map.set(key, { value, qty: 1 }); order.push(key); }
           else { map.get(key).qty += 1; }
         });
-        partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, fields: [], qty: map.get(k).qty }));
-        if (!partRows.length) partRows = [ { id: 1, value: '', qty: 1, fields: [] } ];
+        partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, fields: [], qty: map.get(k).qty, color: '' }));
+        if (!partRows.length) partRows = [ { id: 1, value: '', qty: 1, fields: [], color: '' } ];
         nextPartId = partRows.length + 1;
       }
       if (Array.isArray(state.s) && state.s.length){
@@ -2094,7 +2143,7 @@
     const kerfDisplay = isFinite(kerfVal) && kerfVal >= 0 ? kerfVal : 0;
     const kerfBase = toBase(kerfDisplay, kerfUnit());
 
-    const piecesBase = pieces.map(p => ({ id: p.id, length: toBase(p.length, cutUnit), label: p.label }));
+    const piecesBase = pieces.map(p => ({ id: p.id, length: toBase(p.length, cutUnit), label: p.label, colorCss: p.colorCss }));
 
     const stockTypes = stockRows
       .map(r => {
@@ -2162,7 +2211,7 @@
     const kerfBase = toBase(kerfDisplay, kerfUnit());
     const allowRotate = document.getElementById('allowRotateInput').checked;
 
-    const piecesBase = pieces.map(p => ({ id: p.id, w: toBase(p.w, cutUnit), h: toBase(p.h, cutUnit), label: p.label }));
+    const piecesBase = pieces.map(p => ({ id: p.id, w: toBase(p.w, cutUnit), h: toBase(p.h, cutUnit), label: p.label, colorCss: p.colorCss }));
 
     const stockTypes = stockRows
       .map(r => {
@@ -2664,11 +2713,13 @@
   }
 
   // ---------- printable label sheet, in cut order ----------
-  function labelCard(labelStr, dim, meta){
+  function labelCard(labelStr, dim, meta, colorCss){
     const parts = labelStr ? labelStr.split(' · ') : [];
     const primary = parts.length ? parts[0] : dim;
     const details = parts.slice(1);
-    return '<div class="label-card">' +
+    const banded = colorCss ? ' has-band' : '';
+    const style = colorCss ? ' style="--band:' + colorCss + '"' : '';
+    return '<div class="label-card' + banded + '"' + style + '>' +
       '<div class="lc-name">' + escapeHtml(primary) + '</div>' +
       (labelStr ? '<div class="lc-dim">' + escapeHtml(dim) + '</div>' : '') +
       details.map(d => '<div class="lc-meta">' + escapeHtml(d) + '</div>').join('') +
@@ -2690,7 +2741,7 @@
         html += '<div class="label-grid"><div class="label-stock-head">Sheet ' + String(i+1).padStart(2,'0') + ' — ' + escapeHtml(st.label || size) + '</div>';
         b.placements.slice().sort((a,b2) => (b2.w*b2.h) - (a.w*a.h)).forEach((p, j) => {
           const dw = fmt(fromBase(p.w, cutUnit)), dh = fmt(fromBase(p.h, cutUnit));
-          html += labelCard(p.label, dw + ' x ' + dh + ' ' + cutUnit, 'Sheet ' + (i+1) + ' · part ' + (j+1) + (p.rotated ? ' · rotated' : ''));
+          html += labelCard(p.label, dw + ' x ' + dh + ' ' + cutUnit, 'Sheet ' + (i+1) + ' · part ' + (j+1) + (p.rotated ? ' · rotated' : ''), p.colorCss);
         });
         html += '</div>';
       });
@@ -2702,7 +2753,7 @@
         html += '<div class="label-grid"><div class="label-stock-head">Stock ' + String(i+1).padStart(2,'0') + ' — ' + escapeHtml(st.label || len) + '</div>';
         b.pieces.forEach((p, j) => {
           const dl = fmt(fromBase(p.length, cutUnit));
-          html += labelCard(p.label, dl + ' ' + cutUnit, 'Stock ' + (i+1) + ' · cut ' + (j+1) + ' of ' + b.pieces.length);
+          html += labelCard(p.label, dl + ' ' + cutUnit, 'Stock ' + (i+1) + ' · cut ' + (j+1) + ' of ' + b.pieces.length, p.colorCss);
         });
         html += '</div>';
       });
@@ -2826,7 +2877,7 @@
   // ---------- reset ----------
   function resetAll(){
     if (!window.confirm('Clear all inputs and results?')) return;
-    partRows = [ { id: 1, value: '', qty: 1, fields: [] } ];
+    partRows = [ { id: 1, value: '', qty: 1, fields: [], color: '' } ];
     nextPartId = 2;
     stockRows = [ { id: 1, length: '', width: '', height: '', unit: 'in', price: '', qty: '', label: '' } ];
     nextStockId = 2;
