@@ -14,6 +14,7 @@
     --ink:#1C1A15;
     --ink-soft:#6B6555;
     --ink-faint:#948D7A;
+    --ink-ghost:#C3BCAB;
     --blue:#1F4B5F;
     --blue-deep:#12333F;
     --rust:#B8451F;
@@ -132,7 +133,8 @@
     color:var(--ink);
     background:#FCFBF8;
   }
-  textarea::placeholder{ color:var(--ink-faint); }
+  textarea::placeholder,
+  input::placeholder{ color:var(--ink-ghost); }
 
   input[type="number"], input[type="text"], select{
     width:100%;
@@ -328,6 +330,29 @@
   .part-row input{ background:#fff; }
   .part-row .row-remove{ width:28px; height:34px; }
   #partsTable:empty{ display:none; }
+
+  .parts-section{
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 14px;
+    margin-bottom:12px;
+    background:var(--paper);
+  }
+  .parts-section .section-cap{
+    font-family:var(--font-mono);
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    color:var(--ink-faint);
+    margin-bottom:8px;
+  }
+  .parts-section textarea{ background:#fff; margin-bottom:0; }
+  .parts-section.drop-active{
+    border-color:var(--blue);
+    border-style:dashed;
+    background:var(--rust-soft);
+  }
+  .parts-section .btn-add-row{ margin-top:10px; }
 
   .btn-primary{
     width:100%;
@@ -666,14 +691,24 @@
 
       <div class="field-group">
         <label for="partsBulk" id="cutlistLabel">Cut lengths</label>
-        <textarea id="partsBulk" spellcheck="false" placeholder="Paste a list — one per line. A Grasshopper dump works as-is:
+
+        <div class="parts-section" id="pasteSection">
+          <div class="section-cap">Paste or drop a list</div>
+          <textarea id="partsBulk" spellcheck="false" placeholder="One per line, or a CSV. A Grasshopper dump works as-is:
 38
 24
 60.5 x 2"></textarea>
-        <button class="btn-secondary" id="addPartsBtn" type="button" style="margin-top:6px;">Add pasted list</button>
-        <div class="hint" id="parseHint">Paste a dump (1 of each) or add parts below. Matching values are combined into a quantity you can edit.</div>
-        <div id="partsTable"></div>
-        <button class="btn-add-row" id="addPartBtn" type="button">+ Add part</button>
+          <button class="btn-secondary" id="addPartsBtn" type="button" style="margin-top:8px;">Add pasted list</button>
+          <div class="hint" id="dropHint" style="margin-top:8px;">Paste text or a CSV, or drag a .csv / .txt file here. Duplicates combine into a quantity you can edit.</div>
+        </div>
+
+        <div class="parts-section">
+          <div class="section-cap">Part list</div>
+          <div id="partsTable"></div>
+          <button class="btn-add-row" id="addPartBtn" type="button">+ Add part</button>
+        </div>
+
+        <div class="hint" id="parseHint"></div>
       </div>
 
       <div class="field-group inline">
@@ -761,7 +796,8 @@
   let partRows = [ { id: 1, value: '', qty: 1 } ];
   let nextPartId = 2;
 
-  const PALETTE = ['#1F4B5F','#B8451F','#5C6B3C','#8A6A2F','#3E6350','#6B4C6B','#3E5A6B','#7A4B3E'];
+  const PALETTE = ['#1F4B5F','#B8451F','#5C6B3C','#8A6A2F','#3E6350','#6B4C6B','#3E5A6B','#7A4B3E',
+                   '#2E7E7A','#9C6B2B','#4A7A4A','#8A3B54','#55588A','#A85A32','#7E8A46','#40707E'];
 
   // ---------- unit conversion (base unit: inches) ----------
   const UNIT_TO_IN = { in: 1, ft: 12, mm: 1/25.4, cm: 1/2.54 };
@@ -778,21 +814,30 @@
     return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function unit(){ return document.getElementById('unitSelect').value; }
-  function colorForLength(len){
-    // stable hash of the length value to a palette index
-    const key = Math.round(len * 1000);
-    let h = 0;
-    const s = key.toString();
-    for (let i=0;i<s.length;i++){ h = (h * 31 + s.charCodeAt(i)) >>> 0; }
-    return PALETTE[h % PALETTE.length];
+  // Colors are assigned per run: each distinct size, in sorted order, gets the
+  // next palette entry — so distinct sizes are always distinct colors (a hash
+  // to a fixed palette would collide, e.g. 40x80 and 19x48 landing the same).
+  let colorAssign = new Map();
+  function shiftColor(hex, tier){
+    const n = parseInt(hex.slice(1), 16);
+    let r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+    const amt = (tier % 2 === 1) ? 0.30 : -0.22; // alternate lighten / darken past the palette
+    const adj = c => Math.max(0, Math.min(255, Math.round(amt > 0 ? c + (255-c)*amt : c + c*amt)));
+    return '#' + [adj(r), adj(g), adj(b)].map(c => c.toString(16).padStart(2,'0')).join('');
   }
-  function colorForDims(w, hgt){
-    // stable hash of a W x H pair (order-independent) to a palette index
-    const a = Math.round(Math.min(w,hgt) * 1000), b = Math.round(Math.max(w,hgt) * 1000);
-    const s = a + 'x' + b;
-    let h = 0;
-    for (let i=0;i<s.length;i++){ h = (h * 31 + s.charCodeAt(i)) >>> 0; }
-    return PALETTE[h % PALETTE.length];
+  function paletteColor(i){
+    if (i < PALETTE.length) return PALETTE[i];
+    return shiftColor(PALETTE[i % PALETTE.length], Math.floor(i / PALETTE.length));
+  }
+  function assignColors(orderedKeys){
+    colorAssign = new Map();
+    orderedKeys.forEach((k, i) => colorAssign.set(String(k), paletteColor(i)));
+  }
+  function colorFor(key){ return colorAssign.get(String(key)) || PALETTE[0]; }
+  // canonical, order-independent key for a W x H pair (in display units)
+  function dimKeyOf(pw, ph, cutUnit){
+    const a = parseFloat(fmt(fromBase(pw, cutUnit))), b = parseFloat(fmt(fromBase(ph, cutUnit)));
+    return Math.min(a,b) + ' x ' + Math.max(a,b);
   }
 
   // ---------- parsing ----------
@@ -895,42 +940,130 @@
     updateHash();
   }
 
-  // Pull a dumped list from the paste box into editable rows. Identical values
-  // are combined and their quantities summed; a bare list becomes 1 of each.
-  function importBulk(){
-    const el = document.getElementById('partsBulk');
-    const parsed = mode === 'sheet' ? parseSheetList(el.value) : parseCutlist(el.value);
+  // ---------- CSV parsing (pasted or dropped) ----------
+  function isNumeric(c){ return /^\d+(?:\.\d+)?$/.test(String(c).trim()); }
+  function firstNum(c){ const m = String(c).match(/\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : NaN; }
+  function sizeCell(c){ const m = String(c).match(/(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)/); return m ? [parseFloat(m[1]), parseFloat(m[2])] : null; }
+  function looksTabular(text){ return text.split(/\r?\n/).some(l => /[,\t]/.test(l) && l.trim()); }
 
-    const order = [];
-    const map = new Map();
+  // First row is a header if any cell has letters (not a plain number or "WxH").
+  function headerCells(text){
+    const first = (text.split(/\r?\n/).find(l => l.trim()) || '').trim();
+    const cells = first.split(/[,\t]/).map(c => c.trim());
+    const named = c => c !== '' && !isNumeric(c) && !sizeCell(c);
+    return cells.some(named) ? cells.map(c => c.toLowerCase()) : null;
+  }
+
+  // Decide whether to treat the input as a CSV table. A header row or a dropped
+  // file always counts. Headerless sheet rows of numeric pairs count too. A
+  // bare linear list (incl. comma-separated lengths) is left to the free parser.
+  function shouldCsv(text, fromFile){
+    if (headerCells(text)) return true;
+    if (fromFile && looksTabular(text)) return true;
+    if (mode === 'sheet' && looksTabular(text)){
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      return lines.every(l => {
+        if (/[xX×*]/.test(l)) return false;
+        const cells = l.split(/[,\t]/).map(c => c.trim()).filter(Boolean);
+        return cells.length >= 2 && isNumeric(cells[0]) && isNumeric(cells[1]);
+      });
+    }
+    return false;
+  }
+
+  function csvSeeds(text){
+    const rows = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const header = headerCells(text);
+    let idxLen=-1, idxW=-1, idxH=-1, idxQty=-1, idxSize=-1;
+    let dataRows = rows;
+    if (header){
+      dataRows = rows.slice(1);
+      header.forEach((h, i) => {
+        if (/^(qty|quantity|count|#)$/.test(h)) idxQty = i;
+        else if (/^(length|len|cut|long)$/.test(h)) idxLen = i;
+        else if (/^(width|w)$/.test(h)) idxW = i;
+        else if (/^(height|ht|h|depth|d)$/.test(h)) idxH = i;
+        else if (/^(size|dim|dimensions|part)$/.test(h)) idxSize = i;
+      });
+    }
+    const seeds = [], warnings = [];
+    dataRows.forEach(line => {
+      const cells = line.split(/[,\t]/).map(c => c.trim());
+      if (cells.every(c => c === '')) return;
+      if (mode === 'sheet'){
+        let w, h, qty = 1;
+        const szInRow = cells.map(sizeCell).find(Boolean);
+        if (header && idxSize >= 0 && sizeCell(cells[idxSize])){ [w, h] = sizeCell(cells[idxSize]); }
+        else if (header && idxW >= 0 && idxH >= 0){ w = firstNum(cells[idxW]); h = firstNum(cells[idxH]); }
+        else if (szInRow){ [w, h] = szInRow; }
+        else { const nums = cells.filter(isNumeric).map(parseFloat); w = nums[0]; h = nums[1]; }
+        if (header && idxQty >= 0 && isNumeric(cells[idxQty])) qty = parseInt(cells[idxQty], 10);
+        else if (!header){
+          const nums = cells.filter(c => isNumeric(c) && !cells.some(cc => sizeCell(cc) && cc === c)).map(parseFloat);
+          if (szInRow && nums.length) qty = parseInt(nums[0], 10);
+          else if (!szInRow && nums.length >= 3) qty = parseInt(nums[2], 10);
+        }
+        if (isFinite(w) && isFinite(h) && w > 0 && h > 0) seeds.push({ value: fmt(w) + ' x ' + fmt(h), qty: qty > 0 ? qty : 1 });
+        else warnings.push('Couldn\'t read row "' + line + '".');
+      } else {
+        let len, qty = 1;
+        if (header && idxLen >= 0) len = firstNum(cells[idxLen]);
+        else len = (cells.filter(isNumeric).map(parseFloat))[0];
+        if (header && idxQty >= 0 && isNumeric(cells[idxQty])) qty = parseInt(cells[idxQty], 10);
+        else if (!header){ const nums = cells.filter(isNumeric).map(parseFloat); if (nums.length >= 2) qty = parseInt(nums[1], 10); }
+        if (isFinite(len) && len > 0) seeds.push({ value: fmt(len), qty: qty > 0 ? qty : 1 });
+        else warnings.push('Couldn\'t read row "' + line + '".');
+      }
+    });
+    return { seeds, warnings };
+  }
+
+  // Fold a set of {value, qty} seeds into the existing rows, merging duplicates.
+  function mergeSeeds(seeds){
+    const order = [], map = new Map();
     const seed = (value, qty) => {
       const key = normKey(value);
-      if (!map.has(key)){ map.set(key, { value: value, qty: qty }); order.push(key); }
+      if (!map.has(key)){ map.set(key, { value, qty }); order.push(key); }
       else { map.get(key).qty += qty; }
     };
-    // keep whatever is already in the list, then fold the pasted pieces in
     partRows.forEach(r => { if (String(r.value).trim()) seed(String(r.value).trim(), parseInt(r.qty,10) || 0); });
-    parsed.pieces.forEach(p => {
-      const value = mode === 'sheet' ? (fmt(p.w) + ' x ' + fmt(p.h)) : fmt(p.length);
-      seed(value, 1);
-    });
-
+    seeds.forEach(s => seed(s.value, s.qty > 0 ? s.qty : 1));
     partRows = order.map((k, i) => ({ id: i+1, value: map.get(k).value, qty: map.get(k).qty }));
     if (!partRows.length) partRows = [ { id: 1, value: '', qty: 1 } ];
     nextPartId = partRows.length + 1;
-    el.value = '';
+  }
+
+  // Import pasted text or a dropped file into the editable rows. Identical
+  // values are combined; a bare list becomes 1 of each.
+  function importText(text, opts){
+    opts = opts || {};
+    let seeds, warnings;
+    if (shouldCsv(text, opts.fromFile)){
+      ({ seeds, warnings } = csvSeeds(text));
+    } else {
+      const parsed = mode === 'sheet' ? parseSheetList(text) : parseCutlist(text);
+      warnings = parsed.warnings;
+      seeds = parsed.pieces.map(p => ({ value: mode === 'sheet' ? (fmt(p.w) + ' x ' + fmt(p.h)) : fmt(p.length), qty: 1 }));
+    }
+    mergeSeeds(seeds);
     renderPartsTable();
 
     const hint = document.getElementById('parseHint');
     const total = partRows.reduce((s, r) => s + (parseInt(r.qty,10) || 0), 0);
-    if (parsed.warnings.length){
+    if (warnings.length){
       hint.className = 'hint warn';
-      hint.textContent = parsed.warnings.join(' ');
+      hint.textContent = warnings.join(' ');
     } else {
       hint.className = 'hint';
       hint.textContent = total + (mode === 'sheet' ? (' part' + (total===1?'':'s')) : (' piece' + (total===1?'':'s'))) + ' in list.';
     }
     updateHash();
+  }
+
+  function importBulk(){
+    const el = document.getElementById('partsBulk');
+    importText(el.value, {});
+    el.value = '';
   }
 
   // Expand the editable rows into the flat piece list the optimizer consumes.
@@ -960,6 +1093,32 @@
   }
 
   document.getElementById('addPartsBtn').addEventListener('click', importBulk);
+
+  // drag-and-drop a .csv / .txt file (or dragged text) onto the paste section
+  (function(){
+    const zone = document.getElementById('pasteSection');
+    const stop = e => { e.preventDefault(); e.stopPropagation(); };
+    ['dragenter','dragover'].forEach(ev => zone.addEventListener(ev, e => { stop(e); zone.classList.add('drop-active'); }));
+    ['dragleave','dragend'].forEach(ev => zone.addEventListener(ev, e => {
+      stop(e);
+      if (ev === 'dragleave' && zone.contains(e.relatedTarget)) return;
+      zone.classList.remove('drop-active');
+    }));
+    zone.addEventListener('drop', e => {
+      stop(e);
+      zone.classList.remove('drop-active');
+      const dt = e.dataTransfer;
+      if (dt && dt.files && dt.files.length){
+        const reader = new FileReader();
+        reader.onload = () => importText(String(reader.result || ''), { fromFile: true });
+        reader.readAsText(dt.files[0]);
+      } else if (dt){
+        const txt = dt.getData('text');
+        if (txt) importText(txt, { fromFile: false });
+      }
+    });
+  })();
+
   document.getElementById('addPartBtn').addEventListener('click', () => {
     partRows.push({ id: nextPartId++, value: '', qty: 1 });
     renderPartsTable();
@@ -1689,9 +1848,10 @@
 
     // ---- legend ----
     const uniqueLengths = Array.from(new Set(bins.flatMap(b => b.pieces.map(p => fmt(fromBase(p.length, cutUnit)))))).sort((a,b)=>b-a);
+    assignColors(uniqueLengths);
     let legendHtml = '';
     uniqueLengths.forEach(l => {
-      legendHtml += '<span class="legend-item"><span class="legend-swatch" style="background:' + colorForLength(parseFloat(l)) + '"></span>' + l + ' ' + cutUnit + '</span>';
+      legendHtml += '<span class="legend-item"><span class="legend-swatch" style="background:' + colorFor(l) + '"></span>' + l + ' ' + cutUnit + '</span>';
     });
     legendHtml += '<span class="legend-item"><span class="legend-swatch kerf"></span>kerf</span>';
     legendHtml += '<span class="legend-item"><span class="legend-swatch remnant"></span>remnant</span>';
@@ -1751,7 +1911,7 @@
       const widthPct = (p.length / st.length) * 100;
       const dispLen = fmt(fromBase(p.length, cutUnit));
       seg.style.width = widthPct + '%';
-      seg.style.background = colorForLength(parseFloat(dispLen));
+      seg.style.background = colorFor(dispLen);
       seg.title = dispLen + ' ' + cutUnit;
       if (widthPct > 6) seg.textContent = dispLen;
       bar.appendChild(seg);
@@ -1851,15 +2011,15 @@
     rows += '<tr><td colspan="4" style="text-align:right;font-family:var(--font-display);font-weight:600;">Total</td><td style="font-family:var(--font-display);font-weight:600;">' + fmtMoney(totalCost) + '</td></tr>';
     purchaseTable.innerHTML = rows;
 
-    const uniqueDims = Array.from(new Set(bins.flatMap(b => b.placements.map(p => {
-      const dw = fmt(fromBase(p.rotated ? p.h : p.w, cutUnit));
-      const dh = fmt(fromBase(p.rotated ? p.w : p.h, cutUnit));
-      return dw + ' x ' + dh;
-    })))).sort();
+    const uniqueDims = Array.from(new Set(bins.flatMap(b => b.placements.map(p => dimKeyOf(p.w, p.h, cutUnit)))))
+      .sort((a, b) => {
+        const pa = a.split(' x ').map(Number), pb = b.split(' x ').map(Number);
+        return (pb[0]*pb[1]) - (pa[0]*pa[1]);
+      });
+    assignColors(uniqueDims);
     let legendHtml = '';
     uniqueDims.forEach(d => {
-      const [dw, dh] = d.split(' x ').map(parseFloat);
-      legendHtml += '<span class="legend-item"><span class="legend-swatch" style="background:' + colorForDims(dw, dh) + '"></span>' + d + ' ' + cutUnit + '</span>';
+      legendHtml += '<span class="legend-item"><span class="legend-swatch" style="background:' + colorFor(d) + '"></span>' + d + ' ' + cutUnit + '</span>';
     });
     legendHtml += '<span class="legend-item"><span class="legend-swatch remnant"></span>remnant / kerf margin</span>';
     document.getElementById('legendRow').innerHTML = legendHtml;
@@ -1900,7 +2060,7 @@
     bin.placements.forEach(p => {
       const rx = p.x * sx, ry = p.y * sy, rw = p.w * sx, rh = p.h * sy;
       const dw = fmt(fromBase(p.w, cutUnit)), dh = fmt(fromBase(p.h, cutUnit));
-      svg += '<rect class="sheet-piece-rect" x="' + rx.toFixed(2) + '" y="' + ry.toFixed(2) + '" width="' + rw.toFixed(2) + '" height="' + rh.toFixed(2) + '" fill="' + colorForDims(parseFloat(dw), parseFloat(dh)) + '"><title>' + dw + ' x ' + dh + ' ' + cutUnit + (p.rotated ? ' (rotated)' : '') + '</title></rect>';
+      svg += '<rect class="sheet-piece-rect" x="' + rx.toFixed(2) + '" y="' + ry.toFixed(2) + '" width="' + rw.toFixed(2) + '" height="' + rh.toFixed(2) + '" fill="' + colorFor(dimKeyOf(p.w, p.h, cutUnit)) + '"><title>' + dw + ' x ' + dh + ' ' + cutUnit + (p.rotated ? ' (rotated)' : '') + '</title></rect>';
       const minSide = Math.min(rw, rh);
       if (minSide > 34){
         const fontSize = Math.max(9, Math.min(15, minSide / 4));
