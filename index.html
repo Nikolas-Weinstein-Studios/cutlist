@@ -430,6 +430,8 @@
     margin-bottom:8px;
   }
   .parts-section textarea{ background:#fff; margin-bottom:0; }
+  .cap-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .cap-row .btn-ghost{ padding:4px 8px; }
   .parts-section.drop-active{
     border-color:var(--blue);
     border-style:dashed;
@@ -908,7 +910,11 @@
         </div>
 
         <div class="parts-section" id="pasteSection">
-          <div class="section-cap">Paste or drop a list</div>
+          <div class="section-cap cap-row">
+            <span>Paste, drop, or open a list</span>
+            <button class="btn-ghost" id="fileBtn" type="button">Choose file…</button>
+            <input type="file" id="fileInput" accept=".csv,.txt,text/csv,text/plain" hidden>
+          </div>
           <textarea id="partsBulk" spellcheck="false" placeholder="One per line, or a CSV. A Grasshopper dump works as-is:
 38
 24
@@ -917,8 +923,8 @@
             <div class="col-map-title">Assign columns</div>
             <div id="colMapRows"></div>
           </div>
-          <button class="btn-secondary" id="addPartsBtn" type="button" style="margin-top:8px;">Add pasted list</button>
-          <div class="hint" id="dropHint" style="margin-top:8px;">Paste text or a CSV, or drag a .csv / .txt file here. Duplicates combine into a quantity you can edit.</div>
+          <button class="btn-secondary" id="addPartsBtn" type="button" style="margin-top:8px;">Add to list</button>
+          <div class="hint" id="dropHint" style="margin-top:8px;">Paste, drop a .csv/.txt file, or choose one — it loads above so you can map columns, then click Add. Duplicates combine into a quantity.</div>
         </div>
 
         <div class="parts-section">
@@ -1434,8 +1440,9 @@
 
   function importBulk(){
     const el = document.getElementById('partsBulk');
-    importText(el.value, { roles: colRoles });
+    importText(el.value, { roles: colRoles, fromFile: stagedFromFile });
     el.value = '';
+    stagedFromFile = false;
     refreshColMap();
   }
 
@@ -1468,8 +1475,33 @@
     return { pieces, warnings };
   }
 
+  // A dropped/chosen file (or dragged text) loads into the box so the column
+  // mapper can show; nothing imports until the user clicks Add.
+  let stagedFromFile = false;
+  function loadFileIntoBox(file){
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('partsBulk').value = String(reader.result || '');
+      stagedFromFile = true;
+      refreshColMap();
+    };
+    reader.readAsText(file);
+  }
+  function putTextInBox(text){
+    const el = document.getElementById('partsBulk');
+    el.value = el.value.trim() ? (el.value.replace(/\s+$/,'') + '\n' + text) : text;
+    stagedFromFile = false;
+    refreshColMap();
+  }
+
   document.getElementById('addPartsBtn').addEventListener('click', importBulk);
-  document.getElementById('partsBulk').addEventListener('input', refreshColMap);
+  document.getElementById('partsBulk').addEventListener('input', () => { stagedFromFile = false; refreshColMap(); });
+  document.getElementById('fileBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+  document.getElementById('fileInput').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) loadFileIntoBox(f);
+    e.target.value = '';
+  });
 
   // drag-and-drop a .csv / .txt file (or dragged text) onto the paste section
   (function(){
@@ -1485,14 +1517,8 @@
       stop(e);
       zone.classList.remove('drop-active');
       const dt = e.dataTransfer;
-      if (dt && dt.files && dt.files.length){
-        const reader = new FileReader();
-        reader.onload = () => importText(String(reader.result || ''), { fromFile: true });
-        reader.readAsText(dt.files[0]);
-      } else if (dt){
-        const txt = dt.getData('text');
-        if (txt) importText(txt, { fromFile: false });
-      }
+      if (dt && dt.files && dt.files.length){ loadFileIntoBox(dt.files[0]); }
+      else if (dt){ const txt = dt.getData('text'); if (txt) putTextInBox(txt); }
     });
   })();
 
@@ -2264,16 +2290,12 @@
     rows += '<tr><td colspan="4" style="text-align:right;font-family:var(--font-display);font-weight:600;">Total</td><td style="font-family:var(--font-display);font-weight:600;">' + fmtMoney(totalCost) + '</td></tr>';
     purchaseTable.innerHTML = rows;
 
-    // ---- legend ----
+    // ---- colors + compact key (no per-size list — it's just noise) ----
     const uniqueLengths = Array.from(new Set(bins.flatMap(b => b.pieces.map(p => fmt(fromBase(p.length, cutUnit)))))).sort((a,b)=>b-a);
     assignColors(uniqueLengths);
-    let legendHtml = '';
-    uniqueLengths.forEach(l => {
-      legendHtml += '<span class="legend-item"><span class="legend-swatch" style="background:' + colorFor(l) + '"></span>' + l + ' ' + cutUnit + '</span>';
-    });
-    legendHtml += '<span class="legend-item"><span class="legend-swatch kerf"></span>kerf</span>';
-    legendHtml += '<span class="legend-item"><span class="legend-swatch remnant"></span>remnant</span>';
-    document.getElementById('legendRow').innerHTML = legendHtml;
+    document.getElementById('legendRow').innerHTML =
+      '<span class="legend-item"><span class="legend-swatch kerf"></span>kerf</span>' +
+      '<span class="legend-item"><span class="legend-swatch remnant"></span>remnant</span>';
 
     // ---- bin diagrams ----
     const binsWrap = document.getElementById('binsWrap');
@@ -2441,12 +2463,8 @@
         return (pb[0]*pb[1]) - (pa[0]*pa[1]);
       });
     assignColors(uniqueDims);
-    let legendHtml = '';
-    uniqueDims.forEach(d => {
-      legendHtml += '<span class="legend-item"><span class="legend-swatch" style="background:' + colorFor(d) + '"></span>' + d + ' ' + cutUnit + '</span>';
-    });
-    legendHtml += '<span class="legend-item"><span class="legend-swatch remnant"></span>remnant / kerf margin</span>';
-    document.getElementById('legendRow').innerHTML = legendHtml;
+    document.getElementById('legendRow').innerHTML =
+      '<span class="legend-item"><span class="legend-swatch remnant"></span>remnant / kerf margin</span>';
 
     const binsWrap = document.getElementById('binsWrap');
     binsWrap.innerHTML = '';
